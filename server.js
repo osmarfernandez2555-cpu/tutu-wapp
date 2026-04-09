@@ -19,7 +19,7 @@ if (!fs.existsSync(UPLOADS_DIR)) fs.mkdirSync(UPLOADS_DIR, { recursive: true });
 
 app.use(cors());
 app.use(express.json());
-app.use(express.static(path.join(__dirname, 'public')));
+app.use(express.static(__dirname));
 app.use('/uploads', express.static(UPLOADS_DIR));
 
 // ─── BASE DE DATOS ────────────────────────────────────────────────────────────
