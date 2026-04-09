@@ -1,0 +1,955 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Tutu Automotores — WApp Sender</title>
+<style>
+  :root {
+    --green: #25D366; --green-dark: #128C7E; --green-light: #e9f9f0;
+    --bg: #f5f6fa; --card: #fff; --border: #e3e6ec;
+    --text: #1a1a2e; --muted: #7b8499; --danger: #e74c3c;
+    --radius: 10px; --shadow: 0 2px 12px rgba(0,0,0,0.07);
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: 'Segoe UI', system-ui, sans-serif; background: var(--bg); color: var(--text); font-size: 14px; }
+  .layout { display: flex; min-height: 100vh; }
+  .sidebar { width: 220px; background: #1a1a2e; color: #fff; display: flex; flex-direction: column; padding: 0; flex-shrink: 0; }
+  .sidebar-brand { padding: 20px 18px; border-bottom: 1px solid rgba(255,255,255,0.1); }
+  .sidebar-brand h1 { font-size: 15px; font-weight: 700; color: var(--green); }
+  .sidebar-brand p { font-size: 11px; color: rgba(255,255,255,0.4); margin-top: 2px; }
+  .nav { flex: 1; padding: 10px 0; }
+  .nav-item { display: flex; align-items: center; gap: 10px; padding: 10px 18px; cursor: pointer; font-size: 13px; color: rgba(255,255,255,0.6); transition: all .15s; border-left: 3px solid transparent; }
+  .nav-item:hover { background: rgba(255,255,255,0.05); color: #fff; }
+  .nav-item.active { color: var(--green); background: rgba(37,211,102,0.08); border-left-color: var(--green); }
+  .nav-icon { font-size: 16px; width: 20px; text-align: center; }
+  .wp-status-bar { padding: 12px 18px; border-top: 1px solid rgba(255,255,255,0.08); font-size: 11px; }
+  .wp-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: #ccc; margin-right: 6px; }
+  .wp-dot.connected { background: var(--green); box-shadow: 0 0 6px var(--green); }
+  .wp-dot.waiting { background: #f39c12; }
+  .wp-dot.error { background: var(--danger); }
+  .main { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
+  .topbar { background: var(--card); border-bottom: 1px solid var(--border); padding: 14px 24px; display: flex; align-items: center; justify-content: space-between; }
+  .topbar h2 { font-size: 16px; font-weight: 600; }
+  .content { padding: 24px; flex: 1; overflow-y: auto; }
+  .panel { display: none; } .panel.active { display: block; }
+  .card { background: var(--card); border-radius: var(--radius); border: 1px solid var(--border); padding: 20px; margin-bottom: 16px; box-shadow: var(--shadow); }
+  .card-title { font-size: 13px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: .5px; margin-bottom: 14px; }
+  .stats-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 12px; margin-bottom: 20px; }
+  .stat { background: var(--card); border-radius: var(--radius); border: 1px solid var(--border); padding: 16px; text-align: center; }
+  .stat-n { font-size: 28px; font-weight: 700; color: var(--text); }
+  .stat-l { font-size: 11px; color: var(--muted); margin-top: 4px; }
+  .stat-n.green { color: var(--green-dark); } .stat-n.orange { color: #e67e22; } .stat-n.blue { color: #2980b9; }
+  input, textarea, select { width: 100%; padding: 8px 12px; border: 1px solid var(--border); border-radius: 8px; font-size: 13px; background: var(--bg); color: var(--text); outline: none; transition: border .15s; }
+  input:focus, textarea:focus, select:focus { border-color: var(--green); }
+  label { font-size: 12px; color: var(--muted); margin-bottom: 4px; display: block; }
+  .form-row { display: grid; gap: 10px; margin-bottom: 10px; }
+  .form-row.cols3 { grid-template-columns: 1fr 1fr 1fr auto; align-items: end; }
+  .form-row.cols2 { grid-template-columns: 1fr 1fr; }
+  .btn { padding: 8px 18px; border-radius: 8px; font-size: 13px; font-weight: 600; cursor: pointer; border: none; transition: all .15s; display: inline-flex; align-items: center; gap: 6px; }
+  .btn-green { background: var(--green); color: #fff; } .btn-green:hover { background: var(--green-dark); }
+  .btn-gray { background: var(--border); color: var(--text); } .btn-gray:hover { background: #d0d3db; }
+  .btn-red { background: #fdecea; color: var(--danger); border: 1px solid #f5c6c2; } .btn-red:hover { background: #fad0cd; }
+  .btn-outline { background: transparent; color: var(--green-dark); border: 1px solid var(--green); } .btn-outline:hover { background: var(--green-light); }
+  .btn-sm { padding: 5px 12px; font-size: 12px; }
+  .btn-icon { padding: 5px 8px; font-size: 13px; }
+  .btn:disabled { opacity: .5; cursor: not-allowed; }
+  .drop-zone { border: 2px dashed var(--border); border-radius: var(--radius); padding: 28px; text-align: center; cursor: pointer; transition: all .2s; }
+  .drop-zone:hover { border-color: var(--green); background: var(--green-light); }
+  .drop-zone p { color: var(--muted); font-size: 13px; margin-top: 6px; }
+  .table-wrap { overflow-x: auto; border-radius: var(--radius); border: 1px solid var(--border); }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th { background: #f8f9fc; padding: 9px 12px; text-align: left; font-weight: 600; font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: .4px; border-bottom: 1px solid var(--border); }
+  td { padding: 9px 12px; border-bottom: 1px solid var(--border); }
+  tr:last-child td { border-bottom: none; }
+  tr:hover td { background: #fafbfe; }
+  .badge { display: inline-block; font-size: 11px; font-weight: 600; padding: 2px 9px; border-radius: 20px; }
+  .b-pending { background: #fef3e2; color: #b7600a; }
+  .b-sent { background: #e4f9ee; color: #0f7a43; }
+  .b-failed { background: #fdecea; color: var(--danger); }
+  .b-active { background: #e6f2fb; color: #1a6fa8; }
+  .tanda-card { border: 1px solid var(--border); border-radius: var(--radius); margin-bottom: 12px; overflow: hidden; }
+  .tanda-head { display: flex; align-items: center; justify-content: space-between; padding: 14px 16px; background: var(--card); }
+  .tanda-head h3 { font-size: 14px; font-weight: 600; }
+  .tanda-body { padding: 12px 16px; background: #fafbfe; border-top: 1px solid var(--border); }
+  .progress { height: 6px; background: var(--border); border-radius: 3px; margin: 8px 0 4px; }
+  .progress-fill { height: 100%; background: var(--green); border-radius: 3px; transition: width .4s; }
+  .alert { padding: 10px 14px; border-radius: 8px; font-size: 13px; margin-bottom: 12px; display: flex; align-items: center; gap: 8px; }
+  .alert-info { background: #e6f2fb; color: #1a6fa8; border: 1px solid #b8d9f4; }
+  .alert-success { background: #e4f9ee; color: #0f7a43; border: 1px solid #99e8be; }
+  .alert-warn { background: #fef3e2; color: #b7600a; border: 1px solid #f7d08a; }
+  .alert-error { background: #fdecea; color: var(--danger); border: 1px solid #f5c6c2; }
+  .qr-wrap { text-align: center; padding: 20px; }
+  .qr-wrap img { max-width: 260px; border: 4px solid var(--border); border-radius: 12px; }
+  .tag { display: inline-block; background: #e6f2fb; color: #1a6fa8; font-size: 11px; padding: 2px 7px; border-radius: 4px; cursor: pointer; margin: 2px; border: 1px solid #b8d9f4; }
+  .tag:hover { background: #b8d9f4; }
+  .search-bar { display: flex; gap: 8px; margin-bottom: 14px; }
+  .search-bar input { flex: 1; }
+  .actions-bar { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 14px; }
+  .empty { text-align: center; padding: 32px; color: var(--muted); }
+  .send-progress { background: var(--card); border: 1px solid var(--green); border-radius: var(--radius); padding: 16px; margin-bottom: 16px; }
+  .send-progress h3 { font-size: 14px; font-weight: 600; color: var(--green-dark); margin-bottom: 8px; }
+  textarea { min-height: 90px; resize: vertical; }
+  .paginacion { display: flex; gap: 8px; align-items: center; margin-top: 12px; font-size: 12px; color: var(--muted); }
+  @media (max-width: 700px) { .sidebar { display: none; } .form-row.cols3 { grid-template-columns: 1fr; } .form-row.cols2 { grid-template-columns: 1fr; } }
+</style>
+</head>
+<body>
+<div class="layout">
+  <aside class="sidebar">
+    <div class="sidebar-brand"><h1>🚗 Tutu WApp</h1><p>Automotores · Sender v1.0</p></div>
+    <nav class="nav">
+      <div class="nav-item active" onclick="goTo('dashboard')"><span class="nav-icon">📊</span> Dashboard</div>
+      <div class="nav-item" onclick="goTo('contactos')"><span class="nav-icon">👥</span> Contactos</div>
+      <div class="nav-item" onclick="goTo('tandas')"><span class="nav-icon">📋</span> Tandas</div>
+      <div class="nav-item" onclick="goTo('nueva-tanda')"><span class="nav-icon">✉️</span> Nueva tanda</div>
+      <div class="nav-item" onclick="goTo('historial')"><span class="nav-icon">📜</span> Historial</div>
+      <div class="nav-item" onclick="goTo('whatsapp')"><span class="nav-icon">📲</span> WhatsApp</div>
+      <div style="padding:8px 18px 4px;font-size:10px;color:rgba(255,255,255,0.25);text-transform:uppercase;letter-spacing:1px">Email</div>
+      <div class="nav-item" onclick="goTo('email-contactos')"><span class="nav-icon">📧</span> Contactos email</div>
+      <div class="nav-item" onclick="goTo('email-campanas')"><span class="nav-icon">📨</span> Campañas</div>
+      <div class="nav-item" onclick="goTo('email-nueva')"><span class="nav-icon">✍️</span> Nueva campaña</div>
+      <div class="nav-item" onclick="goTo('email-config')"><span class="nav-icon">⚙️</span> Config Gmail</div>
+    </nav>
+    <div class="wp-status-bar">
+      <span class="wp-dot" id="wp-dot"></span>
+      <span id="wp-status-text">Cargando...</span>
+    </div>
+  </aside>
+
+  <div class="main">
+    <div class="topbar">
+      <h2 id="page-title">Dashboard</h2>
+      <div style="display:flex;gap:8px;align-items:center">
+        <label style="margin:0;font-size:12px">Token:</label>
+        <input type="password" id="adminToken" value="" placeholder="tutu2024" style="width:120px;padding:5px 8px;font-size:12px">
+      </div>
+    </div>
+    <div class="content">
+
+      <!-- DASHBOARD -->
+      <div id="panel-dashboard" class="panel active">
+        <div style="font-size:12px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:8px">WhatsApp</div>
+        <div class="stats-row" id="stats-row">
+          <div class="stat"><div class="stat-n" id="s-total">—</div><div class="stat-l">Contactos WA</div></div>
+          <div class="stat"><div class="stat-n orange" id="s-pend">—</div><div class="stat-l">Pendientes WA</div></div>
+          <div class="stat"><div class="stat-n green" id="s-sent">—</div><div class="stat-l">Enviados WA</div></div>
+          <div class="stat"><div class="stat-n blue" id="s-hoy">—</div><div class="stat-l">WA hoy</div></div>
+          <div class="stat"><div class="stat-n" id="s-tandas">—</div><div class="stat-l">Tandas WA</div></div>
+        </div>
+        <div style="font-size:12px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:8px;margin-top:4px">Email <span id="email-cfg-badge" style="margin-left:8px"></span></div>
+        <div class="stats-row">
+          <div class="stat"><div class="stat-n" id="s-email-contacts">—</div><div class="stat-l">Contactos email</div></div>
+          <div class="stat"><div class="stat-n orange" id="s-email-pend">—</div><div class="stat-l">Pendientes email</div></div>
+          <div class="stat"><div class="stat-n green" id="s-email-sent">—</div><div class="stat-l">Enviados email</div></div>
+          <div class="stat"><div class="stat-n blue" id="s-email-hoy">—</div><div class="stat-l">Emails hoy</div></div>
+        </div>
+        <div id="send-progress-wrap"></div>
+        <div class="card">
+          <div class="card-title">Acciones rápidas</div>
+          <div style="display:flex;gap:10px;flex-wrap:wrap">
+            <button class="btn btn-green" onclick="goTo('nueva-tanda')">📲 Nueva tanda WA</button>
+            <button class="btn btn-green" onclick="goTo('email-nueva')">📧 Nueva campaña email</button>
+            <button class="btn btn-outline" onclick="goTo('contactos')">👥 Contactos WA</button>
+            <button class="btn btn-outline" onclick="goTo('email-contactos')">📋 Contactos email</button>
+            <button class="btn btn-outline" onclick="goTo('whatsapp')">📲 Estado WhatsApp</button>
+            <button class="btn btn-outline" onclick="goTo('email-config')">⚙️ Config Gmail</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- CONTACTOS -->
+      <div id="panel-contactos" class="panel">
+        <div class="card">
+          <div class="card-title">Importar CSV</div>
+          <div class="alert alert-info">📋 El CSV debe tener columnas: <strong>nombre, email, telefono</strong> — el teléfono con código de país (ej: 5493515551234)</div>
+          <div class="drop-zone" onclick="document.getElementById('csvFile').click()" ondragover="event.preventDefault()" ondrop="dropCSV(event)">
+            <div style="font-size:28px">📂</div>
+            <strong>Arrastrá tu CSV o hacé click aquí</strong>
+            <p>Acepta archivos .csv</p>
+          </div>
+          <input type="file" id="csvFile" accept=".csv" style="display:none" onchange="importCSV(this)">
+          <div id="import-result" style="margin-top:10px"></div>
+        </div>
+        <div class="card">
+          <div class="card-title">Agregar contacto</div>
+          <div class="form-row cols3">
+            <div><label>Nombre</label><input id="c-nombre" placeholder="Juan Pérez"></div>
+            <div><label>Email</label><input id="c-email" placeholder="juan@mail.com" type="email"></div>
+            <div><label>Teléfono (con código país)</label><input id="c-tel" placeholder="5493515551234"></div>
+            <button class="btn btn-green btn-sm" onclick="addContact()">+ Agregar</button>
+          </div>
+        </div>
+        <div class="card">
+          <div class="card-title">Base de contactos</div>
+          <div class="search-bar">
+            <input id="c-search" placeholder="Buscar por nombre, email o teléfono..." oninput="loadContacts()">
+            <select id="c-filter" onchange="loadContacts()" style="width:140px">
+              <option value="">Todos</option>
+              <option value="pendiente">Pendientes</option>
+              <option value="enviado">Enviados</option>
+            </select>
+          </div>
+          <div class="actions-bar">
+            <button class="btn btn-gray btn-sm" onclick="exportContacts()">⬇ Exportar CSV</button>
+            <button class="btn btn-red btn-sm" onclick="clearContacts()">🗑 Limpiar todo</button>
+            <span id="c-count" style="font-size:12px;color:var(--muted);align-self:center"></span>
+          </div>
+          <div id="contacts-table"></div>
+          <div class="paginacion" id="paginacion"></div>
+        </div>
+      </div>
+
+      <!-- TANDAS -->
+      <div id="panel-tandas" class="panel">
+        <div class="card">
+          <div class="card-title">Tandas de envío</div>
+          <div id="tandas-list"><div class="empty">Cargando...</div></div>
+        </div>
+      </div>
+
+      <!-- NUEVA TANDA -->
+      <div id="panel-nueva-tanda" class="panel">
+        <div class="card">
+          <div class="card-title">Configurar nueva tanda</div>
+          <div class="form-row cols2">
+            <div><label>Nombre de la tanda</label><input id="t-nombre" placeholder="Ej: Campaña Junio 2024"></div>
+            <div><label>Máximo por día</label><input id="t-max" type="number" value="350" min="1" max="500"></div>
+          </div>
+          <div class="form-row cols2">
+            <div>
+              <label>Delay entre mensajes (segundos)</label>
+              <div style="display:flex;gap:8px;align-items:center">
+                <input type="range" id="t-delay" min="10" max="120" value="25" oninput="document.getElementById('delay-val').textContent=this.value" style="flex:1">
+                <strong id="delay-val">25</strong>s
+              </div>
+            </div>
+            <div><label>Fecha programada (opcional)</label><input id="t-fecha" type="date"></div>
+          </div>
+
+          <!-- IMAGEN -->
+          <div style="margin-bottom:14px">
+            <label style="font-size:13px;font-weight:600;color:var(--text);margin-bottom:8px;display:block">📷 Imagen (opcional)</label>
+            <div id="img-drop" style="border:2px dashed var(--border);border-radius:var(--radius);padding:20px;text-align:center;cursor:pointer;transition:all .2s;background:var(--bg)" onclick="document.getElementById('imgFile').click()" ondragover="event.preventDefault()" ondrop="dropImg(event)">
+              <div id="img-preview-wrap" style="display:none">
+                <img id="img-preview" style="max-height:140px;border-radius:8px;margin-bottom:8px">
+                <div id="img-name" style="font-size:12px;color:var(--muted)"></div>
+                <button class="btn btn-red btn-sm" style="margin-top:8px" onclick="event.stopPropagation();removeImg()">✕ Quitar imagen</button>
+              </div>
+              <div id="img-empty">
+                <div style="font-size:28px">🖼️</div>
+                <div style="font-size:13px;font-weight:600;margin-top:6px">Arrastrá una imagen o hacé click</div>
+                <div style="font-size:12px;color:var(--muted);margin-top:4px">JPG, PNG, GIF, WEBP — máx. 10MB</div>
+              </div>
+            </div>
+            <input type="file" id="imgFile" accept="image/*" style="display:none" onchange="handleImgFile(this)">
+            <div id="img-upload-result" style="margin-top:6px"></div>
+            <div style="margin-top:10px;display:flex;align-items:center;gap:8px" id="img-caption-wrap" style="display:none">
+              <input type="checkbox" id="t-caption" style="width:auto;margin:0">
+              <label for="t-caption" style="font-size:13px;color:var(--text);margin:0;cursor:pointer">Enviar texto como <strong>caption</strong> de la imagen (en un solo mensaje)</label>
+            </div>
+          </div>
+
+          <!-- MENSAJE -->
+          <div style="margin-bottom:10px">
+            <label style="font-size:13px;font-weight:600;color:var(--text);margin-bottom:6px;display:block">💬 Mensaje de texto <span style="font-size:12px;font-weight:400;color:var(--muted)">(opcional si hay imagen)</span></label>
+            <div style="margin-bottom:6px">
+              <span style="font-size:12px;color:var(--muted)">Variables:</span>
+              <span class="tag" onclick="insertVar('{nombre}')">nombre</span>
+              <span class="tag" onclick="insertVar('{telefono}')">telefono</span>
+              <span class="tag" onclick="insertVar('{email}')">email</span>
+            </div>
+            <textarea id="t-template" placeholder="Hola {nombre}! 👋 Te contactamos desde Tutu Automotores..." oninput="updatePreview()"></textarea>
+          </div>
+          <div style="margin-bottom:14px">
+            <label>Vista previa</label>
+            <div id="t-preview" style="background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:10px;font-size:13px;min-height:50px;white-space:pre-wrap;color:var(--text)"></div>
+          </div>
+          <button class="btn btn-green" onclick="crearTanda()">📋 Crear tanda</button>
+          <div id="tanda-result" style="margin-top:10px"></div>
+        </div>
+      </div>
+
+      <!-- HISTORIAL -->
+      <div id="panel-historial" class="panel">
+        <div class="card">
+          <div class="card-title">Historial de envíos</div>
+          <div class="actions-bar">
+            <button class="btn btn-red btn-sm" onclick="clearHistorial()">🗑 Limpiar historial</button>
+          </div>
+          <div id="historial-table"><div class="empty">Cargando...</div></div>
+        </div>
+      </div>
+
+      <!-- WHATSAPP -->
+      <div id="panel-whatsapp" class="panel">
+        <div class="card">
+          <div class="card-title">Estado de WhatsApp</div>
+          <div id="wp-panel"></div>
+        </div>
+      </div>
+
+      <!-- EMAIL CONTACTOS -->
+      <div id="panel-email-contactos" class="panel">
+        <div class="card">
+          <div class="card-title">Importar CSV de emails</div>
+          <div class="alert alert-info">📋 CSV con columnas: <strong>nombre, email, telefono (opcional), tags (opcional)</strong></div>
+          <div class="drop-zone" onclick="document.getElementById('emailCsvFile').click()" ondragover="event.preventDefault()" ondrop="dropEmailCSV(event)">
+            <div style="font-size:28px">📂</div>
+            <strong>Arrastrá tu CSV o hacé click</strong>
+            <p>Solo columna email es obligatoria además de nombre</p>
+          </div>
+          <input type="file" id="emailCsvFile" accept=".csv" style="display:none" onchange="importEmailCSV(this)">
+          <div id="email-import-result" style="margin-top:10px"></div>
+          <div style="margin-top:12px">
+            <button class="btn btn-outline btn-sm" onclick="syncFromWA()">🔄 Sincronizar desde contactos WhatsApp</button>
+            <span style="font-size:12px;color:var(--muted);margin-left:8px">Importa los contactos de WA que tienen email cargado</span>
+          </div>
+        </div>
+        <div class="card">
+          <div class="card-title">Agregar contacto de email</div>
+          <div class="form-row" style="grid-template-columns:1fr 1fr 1fr auto;align-items:end">
+            <div><label>Nombre</label><input id="ec-nombre" placeholder="Juan Pérez"></div>
+            <div><label>Email</label><input id="ec-email" placeholder="juan@mail.com" type="email"></div>
+            <div><label>Teléfono (opcional)</label><input id="ec-tel" placeholder="5493515..."></div>
+            <button class="btn btn-green btn-sm" onclick="addEmailContact()">+ Agregar</button>
+          </div>
+        </div>
+        <div class="card">
+          <div class="card-title">Base de contactos email</div>
+          <div class="search-bar">
+            <input id="ec-search" placeholder="Buscar por nombre o email..." oninput="loadEmailContacts()">
+            <select id="ec-filter" onchange="loadEmailContacts()" style="width:140px">
+              <option value="">Todos</option>
+              <option value="pendiente">Pendientes</option>
+              <option value="enviado">Enviados</option>
+            </select>
+          </div>
+          <div class="actions-bar">
+            <button class="btn btn-red btn-sm" onclick="clearEmailContacts()">🗑 Limpiar todo</button>
+            <span id="ec-count" style="font-size:12px;color:var(--muted);align-self:center"></span>
+          </div>
+          <div id="email-contacts-table"></div>
+        </div>
+      </div>
+
+      <!-- EMAIL CAMPAÑAS -->
+      <div id="panel-email-campanas" class="panel">
+        <div class="card">
+          <div class="card-title">Campañas de email</div>
+          <div id="email-campanas-list"><div class="empty">Cargando...</div></div>
+        </div>
+      </div>
+
+      <!-- EMAIL NUEVA CAMPAÑA -->
+      <div id="panel-email-nueva" class="panel">
+        <div class="card">
+          <div class="card-title">Nueva campaña de email</div>
+          <div class="form-row cols2">
+            <div><label>Nombre de la campaña</label><input id="en-nombre" placeholder="Ej: Promo Julio 2024"></div>
+            <div><label>Máximo por día</label><input id="en-max" type="number" value="300" min="1" max="500"></div>
+          </div>
+          <div class="form-row cols2">
+            <div><label>Remitente (nombre visible)</label><input id="en-from" placeholder="Tutu Automotores"></div>
+            <div><label>Reply-To (opcional)</label><input id="en-reply" placeholder="ventas@tutuautomotores.com" type="email"></div>
+          </div>
+          <div>
+            <label>Delay entre emails (segundos) — recomendado mínimo 3s</label>
+            <div style="display:flex;gap:8px;align-items:center;margin-bottom:10px">
+              <input type="range" id="en-delay" min="2" max="30" value="5" oninput="document.getElementById('en-delay-val').textContent=this.value" style="flex:1">
+              <strong id="en-delay-val">5</strong>s
+            </div>
+          </div>
+          <div style="margin-bottom:10px"><label>Asunto del email</label>
+            <div style="display:flex;gap:6px;align-items:center">
+              <input id="en-asunto" placeholder="¡Hola {nombre}! Tenemos algo especial para vos 🚗" style="flex:1">
+              <span class="tag" onclick="insertEmailVar('en-asunto','{nombre}')">nombre</span>
+            </div>
+          </div>
+          <div style="margin-bottom:10px">
+            <label>Cuerpo del email (HTML)</label>
+            <div style="margin-bottom:6px;display:flex;gap:4px;flex-wrap:wrap;align-items:center">
+              <span style="font-size:12px;color:var(--muted)">Variables:</span>
+              <span class="tag" onclick="insertEmailVar('en-cuerpo','{nombre}')">nombre</span>
+              <span class="tag" onclick="insertEmailVar('en-cuerpo','{email}')">email</span>
+              <span class="tag" onclick="insertEmailVar('en-cuerpo','<strong></strong>')">negrita</span>
+              <span class="tag" onclick="insertEmailVar('en-cuerpo','<br>')">salto línea</span>
+              <span class="tag" onclick="insertEmailVar('en-cuerpo','<a href=\"\">link</a>')">link</span>
+              <button class="btn btn-gray btn-sm" onclick="cargarPlantilla()" style="margin-left:4px">📋 Plantilla base</button>
+            </div>
+            <textarea id="en-cuerpo" style="min-height:180px;font-family:monospace;font-size:12px" placeholder="<h2>Hola {nombre}!</h2><p>...</p>"></textarea>
+          </div>
+          <div style="margin-bottom:14px">
+            <label>Vista previa</label>
+            <div id="en-preview" style="border:1px solid var(--border);border-radius:8px;padding:14px;min-height:80px;background:#fff;font-size:13px"></div>
+          </div>
+          <button class="btn btn-green" onclick="crearCampana()">📨 Crear campaña</button>
+          <div id="campana-result" style="margin-top:10px"></div>
+        </div>
+      </div>
+
+      <!-- EMAIL CONFIG -->
+      <div id="panel-email-config" class="panel">
+        <div class="card">
+          <div class="card-title">Configuración Gmail</div>
+          <div class="alert alert-info">
+            ℹ️ <strong>Contraseña de App:</strong> no uses tu contraseña normal de Gmail. 
+            Generá una en <a href="https://myaccount.google.com/apppasswords" target="_blank" style="color:#185FA5">myaccount.google.com/apppasswords</a> 
+            (requiere verificación en 2 pasos activada).
+          </div>
+          <div id="email-config-status" style="margin-bottom:12px"></div>
+          <div class="form-row cols2">
+            <div><label>Email de Gmail</label><input id="cfg-user" type="email" placeholder="tuempresa@gmail.com"></div>
+            <div><label>Contraseña de App (16 caracteres)</label><input id="cfg-pass" type="password" placeholder="xxxx xxxx xxxx xxxx"></div>
+          </div>
+          <div class="form-row cols2">
+            <div><label>Nombre del remitente</label><input id="cfg-from" placeholder="Tutu Automotores"></div>
+            <div><label>Reply-To</label><input id="cfg-reply" type="email" placeholder="ventas@tutuautomotores.com"></div>
+          </div>
+          <div style="display:flex;gap:10px;margin-top:4px">
+            <button class="btn btn-green" onclick="saveEmailConfig()">💾 Guardar y verificar</button>
+          </div>
+        </div>
+        <div class="card">
+          <div class="card-title">Enviar email de prueba</div>
+          <div style="display:flex;gap:8px;align-items:end">
+            <div style="flex:1"><label>Enviar a</label><input id="test-email" type="email" placeholder="mi@mail.com"></div>
+            <button class="btn btn-outline" onclick="sendTestEmail()">📤 Enviar prueba</button>
+          </div>
+          <div id="test-result" style="margin-top:10px"></div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+</div>
+
+<script>
+const API = '';
+let currentPage = 1;
+let pollInterval = null;
+
+function token() { return document.getElementById('adminToken').value || 'tutu2024'; }
+function headers() { return { 'Content-Type': 'application/json', 'x-admin-token': token() }; }
+async function api(method, path, body) {
+  const opts = { method, headers: headers() };
+  if (body) opts.body = JSON.stringify(body);
+  const r = await fetch(API + path, opts);
+  return r.json();
+}
+
+// ─── NAV ──────────────────────────────────────────────────────────────────────
+const titles = { dashboard:'Dashboard', contactos:'Contactos', tandas:'Tandas de envío', 'nueva-tanda':'Nueva tanda', historial:'Historial', whatsapp:'WhatsApp' };
+function goTo(p) {
+  document.querySelectorAll('.panel').forEach(x => x.classList.remove('active'));
+  document.querySelectorAll('.nav-item').forEach(x => x.classList.remove('active'));
+  document.getElementById('panel-' + p).classList.add('active');
+  document.querySelectorAll('.nav-item').forEach(x => { if (x.textContent.trim().toLowerCase().includes(titles[p]?.split(' ')[0].toLowerCase())) x.classList.add('active'); });
+  document.getElementById('page-title').textContent = titles[p] || p;
+  if (p === 'dashboard') { loadStats(); loadSendProgress(); }
+  if (p === 'contactos') { loadContacts(); }
+  if (p === 'tandas') loadTandas();
+  if (p === 'historial') loadHistorial();
+  if (p === 'whatsapp') loadWPPanel();
+  if (p === 'nueva-tanda') updatePreview();
+}
+
+// ─── STATS ────────────────────────────────────────────────────────────────────
+async function loadStats() {
+  const d = await api('GET', '/api/stats');
+  document.getElementById('s-total').textContent = d.total_contacts ?? '—';
+  document.getElementById('s-pend').textContent = d.pendientes ?? '—';
+  document.getElementById('s-sent').textContent = d.enviados ?? '—';
+  document.getElementById('s-hoy').textContent = d.hoy ?? '—';
+  document.getElementById('s-tandas').textContent = d.total_tandas ?? '—';
+  // email stats
+  const eg = document.getElementById('s-email-contacts');
+  if (eg) eg.textContent = d.email_contacts ?? '—';
+  const ep = document.getElementById('s-email-pend');
+  if (ep) ep.textContent = d.email_pendientes ?? '—';
+  const es = document.getElementById('s-email-sent');
+  if (es) es.textContent = d.email_enviados ?? '—';
+  const eh = document.getElementById('s-email-hoy');
+  if (eh) eh.textContent = d.email_hoy ?? '—';
+  const ecfg = document.getElementById('email-cfg-badge');
+  if (ecfg) ecfg.innerHTML = d.email_config ? '<span class="badge b-sent">Gmail ✅</span>' : '<span class="badge b-pending">Gmail no config</span>';
+  updateWPDot(d.wp_status);
+}
+async function loadSendProgress() {
+  const d = await api('GET', '/api/send-status');
+  const wrap = document.getElementById('send-progress-wrap');
+  if (d && d.tandaId) {
+    const pct = Math.round((d.current / d.total) * 100);
+    wrap.innerHTML = `<div class="send-progress"><h3>⚡ Envío en curso — Tanda #${d.tandaId}</h3>
+      <div class="progress"><div class="progress-fill" style="width:${pct}%"></div></div>
+      <div style="display:flex;justify-content:space-between;font-size:12px;color:var(--muted)"><span>${d.current} de ${d.total} enviados (${pct}%)</span>
+      <button class="btn btn-red btn-sm" onclick="stopSend()">⏹ Detener</button></div></div>`;
+  } else { wrap.innerHTML = ''; }
+}
+
+// ─── WP STATUS ────────────────────────────────────────────────────────────────
+function updateWPDot(status) {
+  const dot = document.getElementById('wp-dot');
+  const txt = document.getElementById('wp-status-text');
+  dot.className = 'wp-dot';
+  if (status === 'conectado') { dot.classList.add('connected'); txt.textContent = 'WA Conectado'; }
+  else if (status === 'esperando_qr' || status === 'iniciando') { dot.classList.add('waiting'); txt.textContent = 'Esperando QR...'; }
+  else if (status === 'error') { dot.classList.add('error'); txt.textContent = 'Error WA'; }
+  else { txt.textContent = 'WA Desconectado'; }
+}
+async function loadWPPanel() {
+  const d = await api('GET', '/api/wp/status');
+  updateWPDot(d.status);
+  const wrap = document.getElementById('wp-panel');
+  const statusLabels = { conectado:'✅ Conectado', esperando_qr:'⏳ Esperando que escanees el QR', iniciando:'🔄 Iniciando...', desconectado:'❌ Desconectado', error:'⛔ Error' };
+  let html = `<div class="alert ${d.status==='conectado'?'alert-success':d.status==='esperando_qr'||d.status==='iniciando'?'alert-warn':'alert-error'}">${statusLabels[d.status]||d.status}</div>`;
+  if (d.status === 'esperando_qr' && d.qr) {
+    html += `<div class="qr-wrap"><p style="margin-bottom:12px;font-size:13px;color:var(--muted)">Abrí WhatsApp → Dispositivos vinculados → Vincular dispositivo</p><img src="${d.qr}" alt="QR Code"><p style="margin-top:10px;font-size:12px;color:var(--muted)">El QR se actualiza automáticamente</p></div>`;
+    setTimeout(loadWPPanel, 5000);
+  }
+  if (d.status === 'desconectado' || d.status === 'error') {
+    html += `<button class="btn btn-green" onclick="connectWP()">📲 Conectar WhatsApp</button>`;
+  }
+  if (d.status === 'conectado') {
+    html += `<button class="btn btn-red" onclick="disconnectWP()">Desconectar</button>`;
+  }
+  if (d.status === 'iniciando' || d.status === 'esperando_qr') {
+    html += `<button class="btn btn-gray" onclick="loadWPPanel()" style="margin-left:8px">🔄 Actualizar</button>`;
+  }
+  wrap.innerHTML = html;
+}
+async function connectWP() {
+  const r = await api('POST', '/api/wp/connect');
+  alert(r.msg); loadWPPanel();
+}
+async function disconnectWP() {
+  if (!confirm('¿Desconectar WhatsApp?')) return;
+  await api('POST', '/api/wp/disconnect'); loadWPPanel();
+}
+
+// ─── CONTACTOS ────────────────────────────────────────────────────────────────
+async function loadContacts() {
+  const search = document.getElementById('c-search')?.value || '';
+  const status = document.getElementById('c-filter')?.value || '';
+  const d = await api('GET', `/api/contacts?search=${encodeURIComponent(search)}&status=${status}&page=${currentPage}&limit=50`);
+  document.getElementById('c-count').textContent = `${d.total} contacto${d.total !== 1 ? 's' : ''}`;
+  const wrap = document.getElementById('contacts-table');
+  if (!d.data.length) { wrap.innerHTML = '<div class="empty">Sin contactos</div>'; return; }
+  const statusBadge = s => s === 'enviado' ? '<span class="badge b-sent">Enviado</span>' : s === 'fallido' ? '<span class="badge b-failed">Fallido</span>' : '<span class="badge b-pending">Pendiente</span>';
+  wrap.innerHTML = `<div class="table-wrap"><table><thead><tr><th>ID</th><th>Nombre</th><th>Email</th><th>Teléfono</th><th>Estado</th><th></th></tr></thead><tbody>
+    ${d.data.map(c => `<tr><td>${c.id}</td><td>${c.nombre}</td><td>${c.email||'—'}</td><td>${c.telefono}</td><td>${statusBadge(c.status)}</td>
+    <td><button class="btn btn-red btn-icon btn-sm" onclick="deleteContact(${c.id})">✕</button></td></tr>`).join('')}
+  </tbody></table></div>`;
+  const pages = Math.ceil(d.total / 50);
+  document.getElementById('paginacion').innerHTML = pages > 1 ? `
+    <button class="btn btn-gray btn-sm" onclick="currentPage=Math.max(1,currentPage-1);loadContacts()" ${currentPage===1?'disabled':''}>← Ant</button>
+    <span>Pág ${currentPage} de ${pages}</span>
+    <button class="btn btn-gray btn-sm" onclick="currentPage=Math.min(${pages},currentPage+1);loadContacts()" ${currentPage>=pages?'disabled':''}>Sig →</button>` : '';
+}
+async function addContact() {
+  const nombre = document.getElementById('c-nombre').value.trim();
+  const email = document.getElementById('c-email').value.trim();
+  const telefono = document.getElementById('c-tel').value.trim();
+  if (!nombre || !telefono) return alert('Nombre y teléfono son obligatorios');
+  const r = await api('POST', '/api/contacts', { nombre, email, telefono });
+  if (r.ok) { document.getElementById('c-nombre').value=''; document.getElementById('c-email').value=''; document.getElementById('c-tel').value=''; loadContacts(); loadStats(); }
+  else alert('Error: ' + r.error);
+}
+async function deleteContact(id) {
+  if (!confirm('¿Eliminar contacto?')) return;
+  await api('DELETE', `/api/contacts/${id}`); loadContacts(); loadStats();
+}
+async function clearContacts() {
+  if (!confirm('¿Eliminar TODOS los contactos? Esta acción no se puede deshacer.')) return;
+  await api('DELETE', '/api/contacts'); loadContacts(); loadStats();
+}
+async function importCSV(input) {
+  const file = input.files[0]; if (!file) return;
+  const fd = new FormData(); fd.append('file', file);
+  const r = await fetch(API + '/api/contacts/import', { method:'POST', headers:{'x-admin-token': token()}, body: fd });
+  const d = await r.json();
+  const res = document.getElementById('import-result');
+  if (d.ok) { res.innerHTML = `<div class="alert alert-success">✅ ${d.inserted} importados, ${d.skipped} omitidos de ${d.total} total</div>`; loadContacts(); loadStats(); }
+  else res.innerHTML = `<div class="alert alert-error">Error: ${d.error}</div>`;
+  setTimeout(() => res.innerHTML = '', 5000);
+  input.value = '';
+}
+function dropCSV(e) { e.preventDefault(); const f = e.dataTransfer.files[0]; if (f) { document.getElementById('csvFile').files = (() => { const dt = new DataTransfer(); dt.items.add(f); return dt.files; })(); importCSV(document.getElementById('csvFile')); } }
+function exportContacts() { window.location = API + `/api/contacts?limit=99999&token=${token()}&export=1`; }
+
+// ─── TANDAS ───────────────────────────────────────────────────────────────────
+async function loadTandas() {
+  const tandas = await api('GET', '/api/tandas');
+  const wrap = document.getElementById('tandas-list');
+  if (!tandas.length) { wrap.innerHTML = '<div class="empty">No hay tandas creadas</div>'; return; }
+  const statusLabel = { pendiente:'<span class="badge b-pending">Pendiente</span>', 'en-curso':'<span class="badge b-active">En curso</span>', completo:'<span class="badge b-sent">Completo</span>', 'completo-con-errores':'<span class="badge b-failed">Completo c/errores</span>' };
+  wrap.innerHTML = tandas.map(t => {
+    const pct = t.total ? Math.round((t.enviados / t.total) * 100) : 0;
+    return `<div class="tanda-card">
+      <div class="tanda-head">
+        <div>
+          <h3>${t.nombre} ${statusLabel[t.status]||''}</h3>
+          <div style="font-size:12px;color:var(--muted);margin-top:3px">${t.total} contactos · ${t.delay_segundos}s delay · creada ${t.created_at?.slice(0,10)}${t.imagen_path ? ' · <span style="color:#0f7a43">🖼️ con imagen</span>' : ''}</div>
+        </div>
+        <div style="display:flex;gap:8px">
+          ${t.status === 'pendiente' || t.status === 'completo-con-errores' ? `<button class="btn btn-green btn-sm" onclick="sendTanda(${t.id})">▶ Enviar</button>` : ''}
+          ${t.status === 'en-curso' ? `<button class="btn btn-red btn-sm" onclick="stopSend()">⏹ Detener</button>` : ''}
+          <button class="btn btn-gray btn-sm" onclick="toggleDetail(${t.id})">Ver</button>
+          <button class="btn btn-red btn-icon btn-sm" onclick="deleteTanda(${t.id})">🗑</button>
+        </div>
+      </div>
+      <div class="tanda-body">
+        <div style="display:flex;justify-content:space-between;font-size:12px;color:var(--muted)"><span>${t.enviados} enviados</span><span>${t.fallidos} fallidos</span><span>${pct}%</span></div>
+        <div class="progress"><div class="progress-fill" style="width:${pct}%"></div></div>
+        <div id="tanda-detail-${t.id}" style="display:none;margin-top:10px"></div>
+      </div>
+    </div>`;
+  }).join('');
+}
+async function toggleDetail(id) {
+  const el = document.getElementById('tanda-detail-' + id);
+  if (el.style.display !== 'none') { el.style.display = 'none'; return; }
+  const d = await api('GET', `/api/tandas/${id}/contactos`);
+  const statusBadge = s => s === 'enviado' ? '<span class="badge b-sent">Enviado</span>' : s === 'fallido' ? `<span class="badge b-failed">Fallido</span>` : '<span class="badge b-pending">Pendiente</span>';
+  el.innerHTML = `<div class="table-wrap"><table><thead><tr><th>Nombre</th><th>Teléfono</th><th>Estado</th><th>Enviado</th></tr></thead><tbody>
+    ${d.slice(0, 100).map(c => `<tr><td>${c.nombre}</td><td>${c.telefono}</td><td>${statusBadge(c.status)}</td><td>${c.enviado_at?.slice(0,16)||'—'}</td></tr>`).join('')}
+  </tbody></table></div>${d.length > 100 ? `<div style="font-size:11px;color:var(--muted);margin-top:6px">Mostrando 100 de ${d.length}</div>` : ''}`;
+  el.style.display = 'block';
+}
+async function deleteTanda(id) {
+  if (!confirm('¿Eliminar esta tanda?')) return;
+  await api('DELETE', `/api/tandas/${id}`); loadTandas();
+}
+async function sendTanda(id) {
+  const d = await api('GET', '/api/wp/status');
+  if (d.status !== 'conectado') { alert('⚠️ WhatsApp no está conectado. Conectalo primero desde la sección "WhatsApp"'); return; }
+  if (!confirm(`¿Iniciar el envío de la tanda #${id}? Los mensajes se enviarán en background respetando el delay configurado.`)) return;
+  const r = await api('POST', `/api/tandas/${id}/send`);
+  if (r.ok) { alert('✅ Envío iniciado! Podés seguir el progreso en el Dashboard.'); loadTandas(); }
+  else alert('Error: ' + r.error);
+}
+async function stopSend() {
+  if (!confirm('¿Detener el envío en curso?')) return;
+  const r = await api('POST', '/api/tandas/stop');
+  alert(r.msg); loadSendProgress(); loadTandas();
+}
+
+// ─── NUEVA TANDA ──────────────────────────────────────────────────────────────
+let uploadedImgPath = null;
+
+function updatePreview() {
+  const tmpl = document.getElementById('t-template')?.value || '';
+  const prev = document.getElementById('t-preview');
+  if (!prev) return;
+  prev.textContent = tmpl.replace(/{nombre}/g,'Juan Pérez').replace(/{telefono}/g,'5493515551234').replace(/{email}/g,'juan@mail.com') || '(sin texto)';
+}
+
+function insertVar(v) {
+  const ta = document.getElementById('t-template');
+  const s = ta.selectionStart, end = ta.selectionEnd;
+  ta.value = ta.value.slice(0, s) + v + ta.value.slice(end);
+  ta.selectionStart = ta.selectionEnd = s + v.length;
+  ta.focus(); updatePreview();
+}
+
+function dropImg(e) {
+  e.preventDefault();
+  const f = e.dataTransfer.files[0];
+  if (f) { const dt = new DataTransfer(); dt.items.add(f); document.getElementById('imgFile').files = dt.files; handleImgFile(document.getElementById('imgFile')); }
+}
+
+function handleImgFile(input) {
+  const file = input.files[0]; if (!file) return;
+  const res = document.getElementById('img-upload-result');
+  res.innerHTML = '<span style="font-size:12px;color:var(--muted)">⏳ Subiendo imagen...</span>';
+  // Preview local
+  const reader = new FileReader();
+  reader.onload = e => {
+    document.getElementById('img-preview').src = e.target.result;
+    document.getElementById('img-name').textContent = file.name;
+    document.getElementById('img-preview-wrap').style.display = 'block';
+    document.getElementById('img-empty').style.display = 'none';
+  };
+  reader.readAsDataURL(file);
+  // Upload al servidor
+  const fd = new FormData(); fd.append('imagen', file);
+  fetch(API + '/api/upload-imagen', { method: 'POST', headers: { 'x-admin-token': token() }, body: fd })
+    .then(r => r.json())
+    .then(d => {
+      if (d.ok) {
+        uploadedImgPath = d.path;
+        res.innerHTML = '<span style="font-size:12px;color:#0f7a43">✅ Imagen subida correctamente</span>';
+        document.getElementById('img-caption-wrap').style.display = 'flex';
+      } else {
+        res.innerHTML = `<span style="font-size:12px;color:var(--danger)">Error: ${d.error}</span>`;
+        removeImg();
+      }
+    });
+}
+
+function removeImg() {
+  if (uploadedImgPath) {
+    fetch(API + `/api/upload-imagen/${uploadedImgPath}`, { method: 'DELETE', headers: headers() });
+    uploadedImgPath = null;
+  }
+  document.getElementById('img-preview-wrap').style.display = 'none';
+  document.getElementById('img-empty').style.display = 'block';
+  document.getElementById('img-upload-result').innerHTML = '';
+  document.getElementById('imgFile').value = '';
+  document.getElementById('img-caption-wrap').style.display = 'none';
+  document.getElementById('t-caption').checked = false;
+}
+
+async function crearTanda() {
+  const nombre = document.getElementById('t-nombre').value.trim();
+  const template = document.getElementById('t-template').value.trim();
+  const delay_segundos = parseInt(document.getElementById('t-delay').value);
+  const max_por_dia = parseInt(document.getElementById('t-max').value);
+  const fecha_programada = document.getElementById('t-fecha').value;
+  const imagen_caption = document.getElementById('t-caption')?.checked ? 1 : 0;
+  if (!nombre) { alert('Completá el nombre de la tanda'); return; }
+  if (!template && !uploadedImgPath) { alert('Necesitás al menos un mensaje o una imagen'); return; }
+  const r = await api('POST', '/api/tandas', { nombre, template, delay_segundos, max_por_dia, fecha_programada, imagen_path: uploadedImgPath, imagen_caption });
+  const res = document.getElementById('tanda-result');
+  if (r.ok) {
+    res.innerHTML = `<div class="alert alert-success">✅ Tanda creada con ${r.total} contactos. <button class="btn btn-outline btn-sm" onclick="goTo('tandas')">Ver tandas →</button></div>`;
+    uploadedImgPath = null;
+    document.getElementById('img-preview-wrap').style.display = 'none';
+    document.getElementById('img-empty').style.display = 'block';
+    document.getElementById('img-upload-result').innerHTML = '';
+    document.getElementById('imgFile').value = '';
+    document.getElementById('t-caption').checked = false;
+    document.getElementById('t-nombre').value = '';
+    document.getElementById('t-template').value = '';
+    loadStats();
+  } else { res.innerHTML = `<div class="alert alert-error">Error: ${r.error}</div>`; }
+}
+
+// ─── HISTORIAL ────────────────────────────────────────────────────────────────
+async function loadHistorial() {
+  const rows = await api('GET', '/api/historial');
+  const wrap = document.getElementById('historial-table');
+  if (!rows.length) { wrap.innerHTML = '<div class="empty">Sin registros</div>'; return; }
+  wrap.innerHTML = `<div class="table-wrap"><table><thead><tr><th>Fecha</th><th>Nombre</th><th>Teléfono</th><th>Tanda</th><th>Estado</th></tr></thead><tbody>
+    ${rows.map(h => `<tr><td>${h.sent_at?.slice(0,16)||'—'}</td><td>${h.nombre}</td><td>${h.telefono}</td><td>#${h.tanda_id}</td>
+    <td>${h.status==='enviado'?'<span class="badge b-sent">Enviado</span>':'<span class="badge b-failed">Fallido</span>'}</td></tr>`).join('')}
+  </tbody></table></div><div style="font-size:12px;color:var(--muted);margin-top:8px">${rows.length} registros (últimos 500)</div>`;
+}
+async function clearHistorial() {
+  if (!confirm('¿Limpiar historial?')) return;
+  await api('DELETE', '/api/historial'); loadHistorial();
+}
+
+// ─── EMAIL JS ──────────────────────────────────────────────────────────────────
+const emailTitles = { 'email-contactos':'Contactos Email', 'email-campanas':'Campañas Email', 'email-nueva':'Nueva Campaña', 'email-config':'Config Gmail' };
+Object.assign(titles, emailTitles);
+
+// Config Gmail
+async function loadEmailConfigStatus() {
+  const d = await api('GET', '/api/email/config');
+  const el = document.getElementById('email-config-status');
+  if (!el) return;
+  if (d.connected) {
+    el.innerHTML = `<div class="alert alert-success">✅ Gmail conectado: <strong>${d.user}</strong> · Remitente: "${d.from_name}"</div>`;
+    document.getElementById('cfg-user').value = d.user;
+    document.getElementById('cfg-from').value = d.from_name;
+    document.getElementById('cfg-reply').value = d.reply_to || '';
+  } else {
+    el.innerHTML = `<div class="alert alert-warn">⚠️ Gmail no configurado. Completá los campos y guardá.</div>`;
+  }
+}
+async function saveEmailConfig() {
+  const user = document.getElementById('cfg-user').value.trim();
+  const pass = document.getElementById('cfg-pass').value.trim();
+  const from_name = document.getElementById('cfg-from').value.trim();
+  const reply_to = document.getElementById('cfg-reply').value.trim();
+  if (!user || !pass) { alert('Email y contraseña de app requeridos'); return; }
+  const btn = event.target; btn.textContent = '⏳ Verificando...'; btn.disabled = true;
+  const r = await api('POST', '/api/email/config', { user, pass, from_name, reply_to });
+  btn.textContent = '💾 Guardar y verificar'; btn.disabled = false;
+  const el = document.getElementById('email-config-status');
+  if (r.ok) { el.innerHTML = `<div class="alert alert-success">${r.msg}</div>`; loadStats(); }
+  else el.innerHTML = `<div class="alert alert-error">❌ ${r.error}</div>`;
+}
+async function sendTestEmail() {
+  const to = document.getElementById('test-email').value.trim();
+  if (!to) { alert('Ingresá un email destino'); return; }
+  const r = await api('POST', '/api/email/test', { to });
+  const el = document.getElementById('test-result');
+  el.innerHTML = r.ok ? `<div class="alert alert-success">✅ ${r.msg}</div>` : `<div class="alert alert-error">❌ ${r.error}</div>`;
+}
+
+// Contactos email
+async function loadEmailContacts() {
+  const search = document.getElementById('ec-search')?.value || '';
+  const status = document.getElementById('ec-filter')?.value || '';
+  const d = await api('GET', `/api/email/contacts?search=${encodeURIComponent(search)}&status=${status}&limit=100`);
+  document.getElementById('ec-count').textContent = `${d.total} contacto${d.total !== 1 ? 's' : ''}`;
+  const wrap = document.getElementById('email-contacts-table');
+  if (!d.data.length) { wrap.innerHTML = '<div class="empty">Sin contactos de email</div>'; return; }
+  const statusBadge = s => s === 'enviado' ? '<span class="badge b-sent">Enviado</span>' : '<span class="badge b-pending">Pendiente</span>';
+  wrap.innerHTML = `<div class="table-wrap"><table><thead><tr><th>Nombre</th><th>Email</th><th>Teléfono</th><th>Estado</th><th></th></tr></thead><tbody>
+    ${d.data.map(c => `<tr><td>${c.nombre}</td><td>${c.email}</td><td>${c.telefono||'—'}</td><td>${statusBadge(c.status)}</td>
+    <td><button class="btn btn-red btn-icon btn-sm" onclick="deleteEmailContact(${c.id})">✕</button></td></tr>`).join('')}
+  </tbody></table></div>`;
+}
+async function addEmailContact() {
+  const nombre = document.getElementById('ec-nombre').value.trim();
+  const email = document.getElementById('ec-email').value.trim();
+  const telefono = document.getElementById('ec-tel').value.trim();
+  if (!nombre || !email) { alert('Nombre y email son obligatorios'); return; }
+  const r = await api('POST', '/api/email/contacts', { nombre, email, telefono });
+  if (r.ok) { document.getElementById('ec-nombre').value=''; document.getElementById('ec-email').value=''; document.getElementById('ec-tel').value=''; loadEmailContacts(); }
+  else alert('Error: ' + r.error);
+}
+async function deleteEmailContact(id) {
+  if (!confirm('¿Eliminar?')) return;
+  await api('DELETE', `/api/email/contacts/${id}`); loadEmailContacts();
+}
+async function clearEmailContacts() {
+  if (!confirm('¿Eliminar TODOS los contactos de email?')) return;
+  await api('DELETE', '/api/email/contacts'); loadEmailContacts();
+}
+async function importEmailCSV(input) {
+  const file = input.files[0]; if (!file) return;
+  const fd = new FormData(); fd.append('file', file);
+  const r = await fetch(API + '/api/email/contacts/import', { method:'POST', headers:{'x-admin-token': token()}, body: fd });
+  const d = await r.json();
+  const res = document.getElementById('email-import-result');
+  if (d.ok) { res.innerHTML = `<div class="alert alert-success">✅ ${d.inserted} importados, ${d.skipped} omitidos de ${d.total}</div>`; loadEmailContacts(); }
+  else res.innerHTML = `<div class="alert alert-error">Error: ${d.error}</div>`;
+  setTimeout(() => res.innerHTML = '', 5000); input.value = '';
+}
+function dropEmailCSV(e) { e.preventDefault(); const f = e.dataTransfer.files[0]; if (f) { const dt=new DataTransfer(); dt.items.add(f); document.getElementById('emailCsvFile').files=dt.files; importEmailCSV(document.getElementById('emailCsvFile')); } }
+async function syncFromWA() {
+  const r = await api('POST', '/api/email/contacts/sync-from-wa');
+  alert(r.ok ? `✅ ${r.imported} importados desde contactos WhatsApp (${r.skipped} ya existían)` : 'Error: ' + r.error);
+  if (r.ok) loadEmailContacts();
+}
+
+// Campañas
+async function loadEmailCampanas() {
+  const campanas = await api('GET', '/api/email/campanas');
+  const wrap = document.getElementById('email-campanas-list');
+  if (!campanas.length) { wrap.innerHTML = '<div class="empty">No hay campañas creadas</div>'; return; }
+  const statusLabel = { pendiente:'<span class="badge b-pending">Pendiente</span>', 'en-curso':'<span class="badge b-active">En curso</span>', completo:'<span class="badge b-sent">Completo</span>', 'completo-con-errores':'<span class="badge b-failed">Completo c/errores</span>' };
+  wrap.innerHTML = campanas.map(c => {
+    const pct = c.total ? Math.round((c.enviados / c.total) * 100) : 0;
+    return `<div class="tanda-card">
+      <div class="tanda-head">
+        <div>
+          <h3>📧 ${c.nombre} ${statusLabel[c.status]||''}</h3>
+          <div style="font-size:12px;color:var(--muted);margin-top:3px">${c.total} contactos · Asunto: "${c.asunto.slice(0,40)}${c.asunto.length>40?'...':''}" · ${c.delay_segundos}s delay</div>
+        </div>
+        <div style="display:flex;gap:8px">
+          ${c.status === 'pendiente' || c.status === 'completo-con-errores' ? `<button class="btn btn-green btn-sm" onclick="sendCampana(${c.id})">▶ Enviar</button>` : ''}
+          ${c.status === 'en-curso' ? `<button class="btn btn-red btn-sm" onclick="stopEmailSend()">⏹ Detener</button>` : ''}
+          <button class="btn btn-gray btn-sm" onclick="toggleEmailDetail(${c.id})">Ver</button>
+          <button class="btn btn-red btn-icon btn-sm" onclick="deleteCampana(${c.id})">🗑</button>
+        </div>
+      </div>
+      <div class="tanda-body">
+        <div style="display:flex;justify-content:space-between;font-size:12px;color:var(--muted)"><span>${c.enviados} enviados</span><span>${c.fallidos} fallidos</span><span>${pct}%</span></div>
+        <div class="progress"><div class="progress-fill" style="width:${pct}%"></div></div>
+        <div id="email-detail-${c.id}" style="display:none;margin-top:10px"></div>
+      </div>
+    </div>`;
+  }).join('');
+}
+async function toggleEmailDetail(id) {
+  const el = document.getElementById('email-detail-' + id);
+  if (el.style.display !== 'none') { el.style.display = 'none'; return; }
+  const d = await api('GET', `/api/email/campanas/${id}/contactos`);
+  const statusBadge = s => s === 'enviado' ? '<span class="badge b-sent">Enviado</span>' : s === 'fallido' ? '<span class="badge b-failed">Fallido</span>' : '<span class="badge b-pending">Pendiente</span>';
+  el.innerHTML = `<div class="table-wrap"><table><thead><tr><th>Nombre</th><th>Email</th><th>Estado</th><th>Enviado</th></tr></thead><tbody>
+    ${d.slice(0,100).map(c => `<tr><td>${c.nombre}</td><td>${c.email}</td><td>${statusBadge(c.status)}</td><td>${c.enviado_at?.slice(0,16)||'—'}</td></tr>`).join('')}
+  </tbody></table></div>`;
+  el.style.display = 'block';
+}
+async function deleteCampana(id) {
+  if (!confirm('¿Eliminar campaña?')) return;
+  await api('DELETE', `/api/email/campanas/${id}`); loadEmailCampanas();
+}
+async function sendCampana(id) {
+  const cfg = await api('GET', '/api/email/config');
+  if (!cfg.connected) { alert('⚠️ Gmail no configurado. Ir a Email → Config Gmail'); return; }
+  if (!confirm(`¿Iniciar el envío de la campaña #${id}?`)) return;
+  const r = await api('POST', `/api/email/campanas/${id}/send`);
+  if (r.ok) { alert('✅ Envío de emails iniciado en background'); loadEmailCampanas(); }
+  else alert('Error: ' + r.error);
+}
+async function stopEmailSend() {
+  if (!confirm('¿Detener el envío?')) return;
+  const r = await api('POST', '/api/email/campanas/stop');
+  alert(r.msg); loadEmailCampanas();
+}
+
+// Nueva campaña
+function insertEmailVar(fieldId, val) {
+  const ta = document.getElementById(fieldId);
+  if (!ta) return;
+  const s = ta.selectionStart, e = ta.selectionEnd;
+  ta.value = ta.value.slice(0, s) + val + ta.value.slice(e);
+  ta.selectionStart = ta.selectionEnd = s + val.length;
+  ta.focus(); updateEmailPreview();
+}
+function updateEmailPreview() {
+  const html = (document.getElementById('en-cuerpo')?.value || '').replace(/{nombre}/g,'Juan Pérez').replace(/{email}/g,'juan@mail.com');
+  const prev = document.getElementById('en-preview');
+  if (prev) prev.innerHTML = html || '<span style="color:#aaa">El email aparece aquí...</span>';
+}
+document.addEventListener('input', e => { if (e.target.id === 'en-cuerpo' || e.target.id === 'en-asunto') updateEmailPreview(); });
+function cargarPlantilla() {
+  document.getElementById('en-cuerpo').value = `<div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;color:#222">
+  <div style="background:#1a1a2e;padding:20px;text-align:center">
+    <h1 style="color:#25D366;margin:0;font-size:22px">🚗 Tutu Automotores</h1>
+  </div>
+  <div style="padding:28px 24px">
+    <h2>Hola {nombre}! 👋</h2>
+    <p style="font-size:15px;line-height:1.6">Tenemos algo especial para vos. En <strong>Tutu Automotores</strong> encontrás los mejores vehículos al mejor precio.</p>
+    <div style="text-align:center;margin:24px 0">
+      <a href="https://tutuautomotores.com.ar" style="background:#25D366;color:#fff;padding:14px 32px;border-radius:8px;text-decoration:none;font-weight:bold;font-size:15px">Ver vehículos disponibles →</a>
+    </div>
+    <p style="font-size:13px;color:#666">¿Tenés alguna consulta? Respondé este email o escribinos por WhatsApp.</p>
+  </div>
+  <div style="background:#f5f5f5;padding:14px;text-align:center;font-size:11px;color:#999">
+    Tutu Automotores · Córdoba, Argentina<br>
+    <a href="#" style="color:#999">Cancelar suscripción</a>
+  </div>
+</div>`;
+  updateEmailPreview();
+}
+async function crearCampana() {
+  const nombre = document.getElementById('en-nombre').value.trim();
+  const asunto = document.getElementById('en-asunto').value.trim();
+  const cuerpo_html = document.getElementById('en-cuerpo').value.trim();
+  const from_name = document.getElementById('en-from').value.trim();
+  const reply_to = document.getElementById('en-reply').value.trim();
+  const delay_segundos = parseInt(document.getElementById('en-delay').value);
+  const max_por_dia = parseInt(document.getElementById('en-max').value);
+  if (!nombre || !asunto || !cuerpo_html) { alert('Completá nombre, asunto y cuerpo del email'); return; }
+  const r = await api('POST', '/api/email/campanas', { nombre, asunto, cuerpo_html, from_name, reply_to, delay_segundos, max_por_dia });
+  const res = document.getElementById('campana-result');
+  if (r.ok) {
+    res.innerHTML = `<div class="alert alert-success">✅ Campaña creada con ${r.total} contactos. <button class="btn btn-outline btn-sm" onclick="goTo('email-campanas')">Ver campañas →</button></div>`;
+    document.getElementById('en-nombre').value = ''; document.getElementById('en-asunto').value = '';
+    document.getElementById('en-cuerpo').value = ''; loadStats();
+  } else res.innerHTML = `<div class="alert alert-error">Error: ${r.error}</div>`;
+}
+
+// Override goTo para paneles email
+const _origGoTo = goTo;
+goTo = function(p) {
+  _origGoTo(p);
+  if (p === 'email-contactos') loadEmailContacts();
+  if (p === 'email-campanas') loadEmailCampanas();
+  if (p === 'email-config') loadEmailConfigStatus();
+  if (p === 'email-nueva') updateEmailPreview();
+};
+
+// ─── INIT ──────────────────────────────────────────────────────────────────────
+loadStats();
+setInterval(() => { loadStats(); loadSendProgress(); }, 8000);
+</script>
+</body>
+</html>
