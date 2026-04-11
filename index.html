@@ -104,6 +104,7 @@
       <div class="nav-item" onclick="goTo('tandas')"><span class="nav-icon">📋</span> Tandas</div>
       <div class="nav-item" onclick="goTo('nueva-tanda')"><span class="nav-icon">✉️</span> Nueva tanda</div>
       <div class="nav-item" onclick="goTo('historial')"><span class="nav-icon">📜</span> Historial</div>
+      <div class="nav-item" onclick="goTo('bandeja')"><span class="nav-icon">💬</span> Bandeja <span id="badge-noleidos" style="display:none;background:#e74c3c;color:#fff;font-size:10px;padding:1px 6px;border-radius:10px;margin-left:4px"></span></div>
       <div class="nav-item" onclick="goTo('whatsapp')"><span class="nav-icon">📲</span> WhatsApp</div>
       <div style="padding:8px 18px 4px;font-size:10px;color:rgba(255,255,255,0.25);text-transform:uppercase;letter-spacing:1px">Email</div>
       <div class="nav-item" onclick="goTo('email-contactos')"><span class="nav-icon">📧</span> Contactos email</div>
@@ -286,6 +287,36 @@
         <div class="card">
           <div class="card-title">Estado de WhatsApp</div>
           <div id="wp-panel"></div>
+        </div>
+      </div>
+
+      <!-- BANDEJA -->
+      <div id="panel-bandeja" class="panel">
+        <div style="display:grid;grid-template-columns:280px 1fr;gap:0;height:calc(100vh - 120px);border:1px solid var(--border);border-radius:var(--radius);overflow:hidden;background:var(--card)">
+          <!-- Lista conversaciones -->
+          <div style="border-right:1px solid var(--border);display:flex;flex-direction:column">
+            <div style="padding:12px;border-bottom:1px solid var(--border)">
+              <input id="bandeja-search" placeholder="Buscar conversación..." style="width:100%;font-size:12px" oninput="filterConversaciones()">
+            </div>
+            <div id="conversaciones-list" style="flex:1;overflow-y:auto"></div>
+          </div>
+          <!-- Ventana de chat -->
+          <div style="display:flex;flex-direction:column">
+            <div id="chat-header" style="padding:12px 16px;border-bottom:1px solid var(--border);background:var(--bg);display:flex;align-items:center;gap:10px">
+              <div id="chat-avatar" style="width:36px;height:36px;border-radius:50%;background:var(--green);display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:700;color:#fff;flex-shrink:0">—</div>
+              <div>
+                <div id="chat-nombre" style="font-weight:600;font-size:14px">Seleccioná una conversación</div>
+                <div id="chat-tel" style="font-size:11px;color:var(--muted)"></div>
+              </div>
+            </div>
+            <div id="chat-messages" style="flex:1;overflow-y:auto;padding:16px;display:flex;flex-direction:column;gap:8px;background:#f0f2f5">
+              <div style="text-align:center;color:var(--muted);font-size:13px;margin-top:40px">← Seleccioná una conversación</div>
+            </div>
+            <div id="chat-input-wrap" style="padding:10px 12px;border-top:1px solid var(--border);display:flex;gap:8px;background:var(--card)">
+              <input id="chat-input" placeholder="Escribí un mensaje..." style="flex:1;font-size:13px" onkeydown="if(event.key==='Enter')sendManual()" disabled>
+              <button class="btn btn-green btn-sm" onclick="sendManual()" id="send-manual-btn" disabled>Enviar</button>
+            </div>
+          </div>
         </div>
       </div>
 
@@ -473,6 +504,8 @@ async function loadStats() {
   if (eh) eh.textContent = d.email_hoy ?? '—';
   const ecfg = document.getElementById('email-cfg-badge');
   if (ecfg) ecfg.innerHTML = d.email_config ? '<span class="badge b-sent">Gmail ✅</span>' : '<span class="badge b-pending">Gmail no config</span>';
+  const badge = document.getElementById('badge-noleidos');
+  if (badge) { badge.textContent = d.no_leidos || 0; badge.style.display = d.no_leidos ? 'inline' : 'none'; }
   updateWPDot(d.wp_status);
 }
 async function loadSendProgress() {
@@ -538,7 +571,10 @@ async function loadContacts() {
   const statusBadge = s => s === 'enviado' ? '<span class="badge b-sent">Enviado</span>' : s === 'fallido' ? '<span class="badge b-failed">Fallido</span>' : '<span class="badge b-pending">Pendiente</span>';
   wrap.innerHTML = `<div class="table-wrap"><table><thead><tr><th>ID</th><th>Nombre</th><th>Email</th><th>Teléfono</th><th>Estado</th><th></th></tr></thead><tbody>
     ${d.data.map(c => `<tr><td>${c.id}</td><td>${c.nombre}</td><td>${c.email||'—'}</td><td>${c.telefono}</td><td>${statusBadge(c.status)}</td>
-    <td><button class="btn btn-red btn-icon btn-sm" onclick="deleteContact(${c.id})">✕</button></td></tr>`).join('')}
+    <td style="display:flex;gap:4px">
+      <button class="btn btn-outline btn-icon btn-sm" onclick="openEditModal(${c.id},'${c.nombre.replace(/'/g,"\\'")}','${(c.email||'').replace(/'/g,"\\'")}','${c.telefono}')" title="Editar">✏️</button>
+      <button class="btn btn-red btn-icon btn-sm" onclick="deleteContact(${c.id})" title="Eliminar">✕</button>
+    </td></tr>`).join('')}
   </tbody></table></div>`;
   const pages = Math.ceil(d.total / 50);
   document.getElementById('paginacion').innerHTML = pages > 1 ? `
@@ -738,6 +774,99 @@ async function loadHistorial() {
 async function clearHistorial() {
   if (!confirm('¿Limpiar historial?')) return;
   await api('DELETE', '/api/historial'); loadHistorial();
+}
+
+// ─── BANDEJA JS ───────────────────────────────────────────────────────────────
+Object.assign(titles, { bandeja: 'Bandeja de mensajes' });
+let conversacionesData = [];
+let telActivo = null;
+let bandejaInterval = null;
+
+async function loadBandeja() {
+  const rows = await api('GET', '/api/bandeja');
+  conversacionesData = rows;
+  renderConversaciones(rows);
+  // badge no leídos en sidebar
+  const total = rows.reduce((s, r) => s + (r.no_leidos || 0), 0);
+  const badge = document.getElementById('badge-noleidos');
+  if (badge) { badge.textContent = total; badge.style.display = total ? 'inline' : 'none'; }
+}
+
+function renderConversaciones(rows) {
+  const search = (document.getElementById('bandeja-search')?.value || '').toLowerCase();
+  const filtered = rows.filter(r => r.nombre?.toLowerCase().includes(search) || r.telefono?.includes(search));
+  const wrap = document.getElementById('conversaciones-list');
+  if (!filtered.length) { wrap.innerHTML = '<div class="empty" style="padding:20px;font-size:12px">Sin conversaciones aún</div>'; return; }
+  wrap.innerHTML = filtered.map(r => {
+    const initials = (r.nombre || r.telefono).slice(0,2).toUpperCase();
+    const isActive = r.telefono === telActivo;
+    const preview = (r.ultimo_msg || '').slice(0, 38) + ((r.ultimo_msg || '').length > 38 ? '…' : '');
+    const hora = r.ultimo_at ? new Date(r.ultimo_at).toLocaleTimeString('es-AR', {hour:'2-digit',minute:'2-digit'}) : '';
+    return `<div onclick="abrirConversacion('${r.telefono}','${(r.nombre||r.telefono).replace(/'/g,"\\'")}','${r.telefono}')"
+      style="padding:10px 14px;cursor:pointer;border-bottom:1px solid var(--border);display:flex;gap:10px;align-items:center;background:${isActive ? 'var(--green-light)' : 'transparent'};transition:background .15s">
+      <div style="width:38px;height:38px;border-radius:50%;background:${r.no_leidos ? 'var(--green)' : 'var(--border)'};display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700;color:${r.no_leidos ? '#fff' : 'var(--muted)'};flex-shrink:0">${initials}</div>
+      <div style="flex:1;min-width:0">
+        <div style="display:flex;justify-content:space-between;align-items:center">
+          <span style="font-size:13px;font-weight:${r.no_leidos ? '700' : '500'};color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:140px">${r.nombre || r.telefono}</span>
+          <span style="font-size:10px;color:var(--muted);flex-shrink:0;margin-left:4px">${hora}</span>
+        </div>
+        <div style="font-size:11px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">
+          ${r.ultima_dir === 'saliente' ? '→ ' : ''}${preview}
+          ${r.no_leidos ? `<span style="background:var(--green);color:#fff;font-size:10px;padding:1px 5px;border-radius:10px;margin-left:4px">${r.no_leidos}</span>` : ''}
+        </div>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+function filterConversaciones() { renderConversaciones(conversacionesData); }
+
+async function abrirConversacion(tel, nombre, telefono) {
+  telActivo = tel;
+  document.getElementById('chat-nombre').textContent = nombre;
+  document.getElementById('chat-tel').textContent = telefono;
+  document.getElementById('chat-avatar').textContent = nombre.slice(0,2).toUpperCase();
+  document.getElementById('chat-input').disabled = false;
+  document.getElementById('send-manual-btn').disabled = false;
+  document.getElementById('chat-input').focus();
+  await renderChat(tel);
+  renderConversaciones(conversacionesData);
+}
+
+async function renderChat(tel) {
+  const d = await api('GET', `/api/bandeja/${tel}`);
+  const wrap = document.getElementById('chat-messages');
+  if (!d.msgs?.length) { wrap.innerHTML = '<div style="text-align:center;color:var(--muted);font-size:12px;margin-top:20px">Sin mensajes aún</div>'; return; }
+  wrap.innerHTML = d.msgs.map(m => {
+    const saliente = m.direccion === 'saliente';
+    const hora = new Date(m.created_at).toLocaleTimeString('es-AR', {hour:'2-digit',minute:'2-digit'});
+    const icono = m.tipo === 'imagen' ? '🖼️ ' : m.tipo === 'audio' ? '🎵 ' : '';
+    return `<div style="display:flex;justify-content:${saliente ? 'flex-end' : 'flex-start'}">
+      <div style="max-width:70%;background:${saliente ? '#DCF8C6' : '#fff'};border-radius:${saliente ? '12px 12px 2px 12px' : '12px 12px 12px 2px'};padding:8px 12px;font-size:13px;color:#1a1a1a;box-shadow:0 1px 2px rgba(0,0,0,0.08)">
+        ${icono}${m.contenido}
+        <div style="font-size:10px;color:#999;text-align:right;margin-top:3px">${hora} ${saliente ? '✓✓' : ''}</div>
+      </div>
+    </div>`;
+  }).join('');
+  wrap.scrollTop = wrap.scrollHeight;
+  // actualizar no leídos
+  conversacionesData = conversacionesData.map(c => c.telefono === tel ? {...c, no_leidos: 0} : c);
+  renderConversaciones(conversacionesData);
+  const total = conversacionesData.reduce((s, r) => s + (r.no_leidos || 0), 0);
+  const badge = document.getElementById('badge-noleidos');
+  if (badge) { badge.textContent = total; badge.style.display = total ? 'inline' : 'none'; }
+}
+
+async function sendManual() {
+  const input = document.getElementById('chat-input');
+  const msg = input.value.trim();
+  if (!msg || !telActivo) return;
+  const btn = document.getElementById('send-manual-btn');
+  btn.disabled = true; btn.textContent = '...';
+  const r = await api('POST', `/api/bandeja/${telActivo}/send`, { mensaje: msg });
+  btn.disabled = false; btn.textContent = 'Enviar';
+  if (r.ok) { input.value = ''; await renderChat(telActivo); await loadBandeja(); }
+  else alert('Error: ' + r.error);
 }
 
 // ─── EMAIL JS ──────────────────────────────────────────────────────────────────
@@ -945,11 +1074,69 @@ goTo = function(p) {
   if (p === 'email-campanas') loadEmailCampanas();
   if (p === 'email-config') loadEmailConfigStatus();
   if (p === 'email-nueva') updateEmailPreview();
+  if (p === 'bandeja') {
+    loadBandeja();
+    if (bandejaInterval) clearInterval(bandejaInterval);
+    bandejaInterval = setInterval(() => {
+      loadBandeja();
+      if (telActivo) renderChat(telActivo);
+    }, 5000);
+  } else {
+    if (bandejaInterval) { clearInterval(bandejaInterval); bandejaInterval = null; }
+  }
 };
+
+// ─── EDITAR CONTACTO ──────────────────────────────────────────────────────────
+function openEditModal(id, nombre, email, telefono) {
+  document.getElementById('edit-id').value = id;
+  document.getElementById('edit-nombre').value = nombre;
+  document.getElementById('edit-email').value = email || '';
+  document.getElementById('edit-tel').value = telefono;
+  document.getElementById('edit-error').textContent = '';
+  const overlay = document.getElementById('modal-overlay');
+  overlay.style.display = 'flex';
+  setTimeout(() => document.getElementById('edit-nombre').focus(), 50);
+}
+
+function closeModal() {
+  document.getElementById('modal-overlay').style.display = 'none';
+}
+
+async function saveEdit() {
+  const id = document.getElementById('edit-id').value;
+  const nombre = document.getElementById('edit-nombre').value.trim();
+  const email = document.getElementById('edit-email').value.trim();
+  const telefono = document.getElementById('edit-tel').value.trim();
+  if (!nombre || !telefono) { document.getElementById('edit-error').textContent = 'Nombre y teléfono son obligatorios'; return; }
+  const r = await api('PUT', `/api/contacts/${id}`, { nombre, email, telefono });
+  if (r.ok) { closeModal(); loadContacts(); loadStats(); }
+  else document.getElementById('edit-error').textContent = 'Error: ' + r.error;
+}
+
+document.addEventListener('keydown', e => { if (e.key === 'Escape') closeModal(); });
 
 // ─── INIT ──────────────────────────────────────────────────────────────────────
 loadStats();
 setInterval(() => { loadStats(); loadSendProgress(); }, 8000);
 </script>
+
+<!-- MODAL EDITAR CONTACTO -->
+<div id="modal-overlay" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.45);z-index:1000;align-items:center;justify-content:center" onclick="if(event.target===this)closeModal()">
+  <div style="background:var(--card);border-radius:var(--radius);padding:24px;width:420px;max-width:90vw;box-shadow:0 8px 32px rgba(0,0,0,0.18)">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:18px">
+      <h3 style="font-size:15px;font-weight:600">Editar contacto</h3>
+      <button onclick="closeModal()" style="background:none;border:none;font-size:18px;cursor:pointer;color:var(--muted);line-height:1">✕</button>
+    </div>
+    <input type="hidden" id="edit-id">
+    <div style="margin-bottom:12px"><label>Nombre</label><input id="edit-nombre" placeholder="Juan Pérez"></div>
+    <div style="margin-bottom:12px"><label>Email</label><input id="edit-email" type="email" placeholder="juan@mail.com"></div>
+    <div style="margin-bottom:18px"><label>Teléfono (con código país)</label><input id="edit-tel" placeholder="5493515551234"></div>
+    <div style="display:flex;gap:10px;justify-content:flex-end">
+      <button class="btn btn-gray" onclick="closeModal()">Cancelar</button>
+      <button class="btn btn-green" onclick="saveEdit()">💾 Guardar cambios</button>
+    </div>
+    <div id="edit-error" style="margin-top:10px;font-size:12px;color:var(--danger)"></div>
+  </div>
+</div>
 </body>
 </html>
