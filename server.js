@@ -10,6 +10,15 @@ const wppconnect = require('@wppconnect-team/wppconnect');
 const Database = require('better-sqlite3');
 const nodemailer = require('nodemailer');
 
+// ── TUTUSITA BOT CONFIG ──────────────────────────────────────────────────────
+// URL del backend del chatbot de Tutu (el que está en Railway)
+// Podés cambiarla con la variable de entorno TUTU_BOT_URL
+const TUTU_BOT_URL = process.env.TUTU_BOT_URL || 'https://tutu-chat-agent-production.up.railway.app';
+// Historial de conversaciones por número de teléfono (en memoria)
+// Se resetea cuando se reinicia el servidor
+const conversaciones = {};
+// ────────────────────────────────────────────────────────────────────────────
+
 const app = express();
 const PORT = process.env.PORT || 3000;
 const ADMIN_TOKEN = process.env.ADMIN_TOKEN || 'tutu2024';
@@ -126,12 +135,6 @@ db.exec(`
 
 try { db.exec("ALTER TABLE tandas ADD COLUMN imagen_path TEXT"); } catch(e) {}
 try { db.exec("ALTER TABLE tandas ADD COLUMN imagen_caption INTEGER DEFAULT 0"); } catch(e) {}
-try { db.exec(`CREATE TABLE IF NOT EXISTS mensajes (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    telefono TEXT NOT NULL, nombre TEXT,
-    direccion TEXT NOT NULL, contenido TEXT NOT NULL,
-    tipo TEXT DEFAULT 'texto', leido INTEGER DEFAULT 0,
-    created_at DATETIME DEFAULT CURRENT_TIMESTAMP)`); } catch(e) {}
 
 const imgStorage = multer.diskStorage({
   destination: (req, file, cb) => cb(null, UPLOADS_DIR),
@@ -203,20 +206,80 @@ async function initWPP() {
     wpStatus = 'conectado';
     lastQR = null;
     console.log('[WPP] ✅ WhatsApp conectado');
+    console.log('[BOT] 🤖 Tutusita activa — conectada a', TUTU_BOT_URL);
 
-    wpClient.onMessage((msg) => {
+    // ── HANDLER DE MENSAJES CON TUTUSITA BOT ─────────────────────────────────
+    wpClient.onMessage(async (msg) => {
       try {
         if (msg.isGroupMsg) return;
-        const tel = msg.from.replace('@c.us', '').replace(/\D/g,'');
-        const contenido = msg.body || '[multimedia]';
+        const tel = msg.from.replace('@c.us', '').replace(/[^0-9]/g, '');
+        const contenido = msg.body || '';
+        if (!contenido) return; // ignorar multimedia sin texto
         const tipo = msg.type === 'image' ? 'imagen' : msg.type === 'audio' ? 'audio' : 'texto';
         const contacto = db.prepare("SELECT nombre FROM contacts WHERE telefono = ?").get(tel);
         const nombre = contacto?.nombre || msg.sender?.pushname || tel;
+
+        // Guardar mensaje entrante en la bandeja
         db.prepare("INSERT INTO mensajes (telefono, nombre, direccion, contenido, tipo) VALUES (?,?,?,?,?)")
           .run(tel, nombre, 'entrante', contenido, tipo);
-        console.log(`[MSG] ← ${nombre} (${tel}): ${contenido.slice(0,50)}`);
+        console.log(`[MSG] ← ${nombre} (${tel}): ${contenido.slice(0, 50)}`);
+
+        // Solo responder con el bot si es texto
+        if (tipo !== 'texto') return;
+
+        // Historial de conversacion por numero (en memoria)
+        if (!conversaciones[tel]) conversaciones[tel] = [];
+        conversaciones[tel].push({ role: 'user', content: contenido });
+        // Mantener solo los ultimos 20 mensajes
+        if (conversaciones[tel].length > 20) conversaciones[tel] = conversaciones[tel].slice(-20);
+
+        try {
+          const nodeFetch = require('node-fetch');
+          const resp = await nodeFetch(`${TUTU_BOT_URL}/api/chat`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              messages: conversaciones[tel],
+              sessionId: 'wa_' + tel
+            }),
+            timeout: 30000
+          });
+
+          const data = await resp.json();
+          if (data.error) throw new Error(data.error);
+
+          const respuesta = data.message;
+          if (!respuesta) return;
+
+          // Guardar respuesta del bot en el historial de conversacion
+          conversaciones[tel].push({ role: 'assistant', content: respuesta });
+
+          // Enviar respuesta por WhatsApp
+          await wpClient.sendText(`${tel}@c.us`, respuesta);
+
+          // Guardar en bandeja como saliente
+          db.prepare("INSERT INTO mensajes (telefono, nombre, direccion, contenido, tipo) VALUES (?,?,?,?,?)")
+            .run(tel, nombre, 'saliente', respuesta, 'texto');
+          console.log(`[BOT] → ${nombre}: ${respuesta.slice(0, 60)}`);
+
+          // Si hay autos en la respuesta, enviarlos como mensajes separados
+          if (data.autos && data.autos.length > 0) {
+            await new Promise(r => setTimeout(r, 1500));
+            for (const auto of data.autos.slice(0, 3)) {
+              const autoMsg = `🚗 *${auto.nombre}*\n💰 ${auto.precio}${auto.año ? '\n📅 ' + auto.año : ''}${auto.km ? '\n🛣️ ' + auto.km : ''}\n🔗 ${auto.url}`;
+              await wpClient.sendText(`${tel}@c.us`, autoMsg);
+              await new Promise(r => setTimeout(r, 1000));
+            }
+          }
+
+        } catch(botErr) {
+          console.error('[BOT] Error respondiendo:', botErr.message);
+          // No responder si el bot falla para no spamear al cliente
+        }
+
       } catch(e) { console.error('[MSG] Error:', e.message); }
     });
+    // ── FIN HANDLER ────────────────────────────────────────────────────────────
 
     wpClient.onStateChange((state) => {
       console.log('[WPP] Estado cambió:', state);
@@ -244,6 +307,23 @@ app.post('/api/wp/disconnect', auth, async (req, res) => {
     res.json({ ok: true });
   } catch(e) { res.json({ ok: false, error: e.message }); }
 });
+
+// ── Endpoint para reiniciar conversacion del bot con un numero ───────────────
+app.delete('/api/bot/conversacion/:telefono', auth, (req, res) => {
+  const tel = req.params.telefono.replace(/[^0-9]/g, '');
+  delete conversaciones[tel];
+  res.json({ ok: true, msg: `Conversacion del bot reiniciada para ${tel}` });
+});
+// Listar conversaciones activas del bot
+app.get('/api/bot/conversaciones', auth, (req, res) => {
+  const resumen = Object.keys(conversaciones).map(tel => ({
+    telefono: tel,
+    mensajes: conversaciones[tel].length,
+    ultimoMensaje: conversaciones[tel].slice(-1)[0]?.content?.slice(0, 60) || ''
+  }));
+  res.json({ total: resumen.length, conversaciones: resumen });
+});
+// ────────────────────────────────────────────────────────────────────────────
 
 app.get('/api/contacts', auth, (req, res) => {
   const { search, status, page = 1, limit = 100 } = req.query;
@@ -624,12 +704,16 @@ app.get('/api/stats', auth, (req, res) => {
     email_pendientes: db.prepare("SELECT COUNT(*) as c FROM email_contacts WHERE status='pendiente'").get().c,
     email_enviados: db.prepare("SELECT COUNT(*) as c FROM email_contacts WHERE status='enviado'").get().c,
     email_hoy: db.prepare("SELECT COUNT(*) as c FROM email_historial WHERE date(sent_at)=date('now')").get().c,
-    email_config: !!emailTransporter
+    email_config: !!emailTransporter,
+    bot_activo: true,
+    bot_url: TUTU_BOT_URL,
+    bot_conversaciones: Object.keys(conversaciones).length
   });
 });
 
 app.listen(PORT, () => {
   console.log(`[SERVER] Puerto ${PORT}`);
+  console.log(`[BOT] Tutusita conectada a ${TUTU_BOT_URL}`);
   if (fs.existsSync(`./tokens/${SESSION_NAME}`)) {
     console.log('[WPP] Sesión encontrada, reconectando...');
     setTimeout(initWPP, 2000);
