@@ -212,9 +212,14 @@ async function initWPP() {
     wpClient.onMessage(async (msg) => {
       try {
         if (msg.isGroupMsg) return;
-        const tel = msg.from.replace('@c.us', '').replace(/[^0-9]/g, '');
+        // Extraer numero limpio - msg.from puede ser "549XXXXXXXXX@c.us" o similar
+        const telRaw = msg.from.replace('@c.us', '').replace('@s.whatsapp.net', '').replace(/[^0-9]/g, '');
+        const tel = telRaw;
+        if (!tel || tel.length < 8) return; // ignorar numeros invalidos
         const contenido = msg.body || '';
-        if (!contenido) return; // ignorar multimedia sin texto
+        // Ignorar mensajes vacíos o que son base64 de multimedia
+        if (!contenido) return;
+        if (contenido.startsWith('/9j/') || contenido.startsWith('data:') || contenido.length > 2000) return;
         const tipo = msg.type === 'image' ? 'imagen' : msg.type === 'audio' ? 'audio' : 'texto';
         const contacto = db.prepare("SELECT nombre FROM contacts WHERE telefono = ?").get(tel);
         const nombre = contacto?.nombre || msg.sender?.pushname || tel;
@@ -260,7 +265,8 @@ async function initWPP() {
           conversaciones[tel].push({ role: 'assistant', content: respuesta });
 
           // Enviar respuesta por WhatsApp
-          await wpClient.sendText(`${tel}@c.us`, respuesta);
+          // Usar el from original para responder (evita invalid wid)
+          await wpClient.sendText(msg.from, respuesta);
 
           // Guardar en bandeja como saliente
           db.prepare("INSERT INTO mensajes (telefono, nombre, direccion, contenido, tipo) VALUES (?,?,?,?,?)")
@@ -272,7 +278,7 @@ async function initWPP() {
             await new Promise(r => setTimeout(r, 1500));
             for (const auto of data.autos.slice(0, 3)) {
               const autoMsg = `🚗 *${auto.nombre}*\n💰 ${auto.precio}${auto.año ? '\n📅 ' + auto.año : ''}${auto.km ? '\n🛣️ ' + auto.km : ''}\n🔗 ${auto.url}`;
-              await wpClient.sendText(`${tel}@c.us`, autoMsg);
+              await wpClient.sendText(msg.from, autoMsg);
               await new Promise(r => setTimeout(r, 1000));
             }
           }
