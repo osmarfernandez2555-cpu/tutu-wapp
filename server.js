@@ -231,15 +231,20 @@ async function initWPP() {
         if (!conversaciones[tel]) conversaciones[tel] = [];
         conversaciones[tel].push({ role: 'user', content: contenido });
         // Mantener solo los ultimos 20 mensajes
-        if (conversaciones[tel].length > 20) conversaciones[tel] = conversaciones[tel].slice(-20);
+        if (conversaciones[tel].length > 6) conversaciones[tel] = conversaciones[tel].slice(-6);
 
         try {
           const nodeFetch = require('node-fetch');
+          // Recortar mensajes muy largos para no superar el limite de tokens
+          const mensajesRecortados = conversaciones[tel].map(m => ({
+            role: m.role,
+            content: m.content.slice(0, 500)
+          }));
           const resp = await nodeFetch(`${TUTU_BOT_URL}/api/chat`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
-              messages: conversaciones[tel],
+              messages: mensajesRecortados,
               sessionId: 'wa_' + tel
             }),
             timeout: 30000
