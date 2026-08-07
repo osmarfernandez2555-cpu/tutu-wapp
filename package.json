@@ -7,7 +7,7 @@
     "start": "node server.js"
   },
   "dependencies": {
-    "@whiskeysockets/baileys": "^6.7.16",
+    "@whiskeysockets/baileys": "6.7.9",
     "@hapi/boom": "^10.0.1",
     "qrcode": "^1.5.3",
     "pino": "^8.21.0",
