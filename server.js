@@ -111,13 +111,13 @@ app.post('/webhook/evolution', async (req, res) => {
     const contacto = db.prepare("SELECT nombre FROM contacts WHERE telefono = ?").get(tel);
     const nombreFinal = contacto?.nombre || nombre;
 
-    // Cooldown: ignorar si ya procesamos un mensaje de este numero recientemente
+    // Cooldown: solo aplica a imagenes para evitar procesar multiples fotos seguidas
     const ahora = Date.now();
-    if (cooldowns[tel] && ahora - cooldowns[tel] < COOLDOWN_MS) {
+    if (esImagen && cooldowns[tel] && ahora - cooldowns[tel] < COOLDOWN_MS) {
       db.prepare("INSERT INTO mensajes (telefono, nombre, direccion, contenido, tipo) VALUES (?,?,?,?,?)").run(tel, nombreFinal, 'entrante', contenido || '[foto]', tipo);
       return;
     }
-    cooldowns[tel] = ahora;
+    if (esImagen) cooldowns[tel] = ahora;
 
     db.prepare("INSERT INTO mensajes (telefono, nombre, direccion, contenido, tipo) VALUES (?,?,?,?,?)").run(tel, nombreFinal, 'entrante', contenido || '[foto]', tipo);
     console.log(`[MSG] <- ${nombreFinal} (${tel}): ${(contenido||'[foto]').slice(0,50)}`);
