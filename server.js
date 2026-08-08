@@ -16,7 +16,7 @@ const EVO_APIKEY      = process.env.EVO_APIKEY      || 'b0aeeb8fd07ecb732ef096d8
 const EVO_INSTANCE    = process.env.EVO_INSTANCE    || 'tutu';
 const conversaciones  = {};
 const cooldowns       = {}; // evita procesar multiples imagenes seguidas
-const COOLDOWN_MS     = 4000; // 4 segundos entre respuestas por numero
+const COOLDOWN_MS     = 10000; // 10 segundos entre respuestas por numero
 
 const app         = express();
 const PORT        = process.env.PORT || 3000;
