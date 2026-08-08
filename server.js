@@ -109,11 +109,12 @@ app.post('/webhook/evolution', async (req, res) => {
     db.prepare("INSERT INTO mensajes (telefono, nombre, direccion, contenido, tipo) VALUES (?,?,?,?,?)").run(tel, nombreFinal, 'entrante', contenido, tipo);
     console.log(`[MSG] <- ${nombreFinal} (${tel}): ${contenido.slice(0,50)}`);
 
-    if (tipo !== 'texto') return;
+    // Si es imagen, enviar mensaje especial al bot para que continúe el flujo
+    const mensajeParaBot = tipo !== 'texto' ? '[El cliente envió una foto]' : contenido;
 
     // Llamar al bot
     if (!conversaciones[tel]) conversaciones[tel] = [];
-    conversaciones[tel].push({ role: 'user', content: contenido });
+    conversaciones[tel].push({ role: 'user', content: mensajeParaBot });
     if (conversaciones[tel].length > 6) conversaciones[tel] = conversaciones[tel].slice(-6);
 
     const mensajesRecortados = conversaciones[tel].map(m => ({ role: m.role, content: m.content.slice(0,500) }));
