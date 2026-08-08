@@ -15,6 +15,8 @@ const EVO_URL         = process.env.EVO_URL         || 'https://evolution-api-pr
 const EVO_APIKEY      = process.env.EVO_APIKEY      || 'b0aeeb8fd07ecb732ef096d805087cab8c155b57c46ec6086b036615ab314605';
 const EVO_INSTANCE    = process.env.EVO_INSTANCE    || 'tutu';
 const conversaciones  = {};
+const cooldowns       = {}; // evita procesar multiples imagenes seguidas
+const COOLDOWN_MS     = 4000; // 4 segundos entre respuestas por numero
 
 const app         = express();
 const PORT        = process.env.PORT || 3000;
@@ -109,8 +111,16 @@ app.post('/webhook/evolution', async (req, res) => {
     const contacto = db.prepare("SELECT nombre FROM contacts WHERE telefono = ?").get(tel);
     const nombreFinal = contacto?.nombre || nombre;
 
-    db.prepare("INSERT INTO mensajes (telefono, nombre, direccion, contenido, tipo) VALUES (?,?,?,?,?)").run(tel, nombreFinal, 'entrante', contenido, tipo);
-    console.log(`[MSG] <- ${nombreFinal} (${tel}): ${contenido.slice(0,50)}`);
+    // Cooldown: ignorar si ya procesamos un mensaje de este numero recientemente
+    const ahora = Date.now();
+    if (cooldowns[tel] && ahora - cooldowns[tel] < COOLDOWN_MS) {
+      db.prepare("INSERT INTO mensajes (telefono, nombre, direccion, contenido, tipo) VALUES (?,?,?,?,?)").run(tel, nombreFinal, 'entrante', contenido || '[foto]', tipo);
+      return;
+    }
+    cooldowns[tel] = ahora;
+
+    db.prepare("INSERT INTO mensajes (telefono, nombre, direccion, contenido, tipo) VALUES (?,?,?,?,?)").run(tel, nombreFinal, 'entrante', contenido || '[foto]', tipo);
+    console.log(`[MSG] <- ${nombreFinal} (${tel}): ${(contenido||'[foto]').slice(0,50)}`);
 
     // Si es imagen, enviar mensaje especial al bot para que continúe el flujo
     const mensajeParaBot = tipo !== 'texto' ? '[El cliente envió una foto]' : contenido;
