@@ -98,10 +98,13 @@ app.post('/webhook/evolution', async (req, res) => {
     const tel = jid.replace('@s.whatsapp.net','').replace('@c.us','').replace(/[^0-9]/g,'').replace(/^54/,'');
     if (!tel || tel.length < 8) return;
 
+    const esImagen = !!msg.message?.imageMessage;
+    const esAudio  = !!msg.message?.audioMessage;
     const contenido = msg.message?.conversation || msg.message?.extendedTextMessage?.text || msg.message?.imageMessage?.caption || '';
-    if (!contenido || contenido.length > 2000) return;
+    // Si es imagen sin texto igual continuar el flujo
+    if (!esImagen && (!contenido || contenido.length > 2000)) return;
 
-    const tipo = msg.message?.imageMessage ? 'imagen' : msg.message?.audioMessage ? 'audio' : 'texto';
+    const tipo = esImagen ? 'imagen' : esAudio ? 'audio' : 'texto';
     const nombre = msg.pushName || tel;
     const contacto = db.prepare("SELECT nombre FROM contacts WHERE telefono = ?").get(tel);
     const nombreFinal = contacto?.nombre || nombre;
