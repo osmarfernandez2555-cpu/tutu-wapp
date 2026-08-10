@@ -848,9 +848,6 @@ async function renderChat(tel, limit = 500) {
       </div>
     </div>`;
   }).join('');
-  // Forzar scroll al fondo con delay para asegurar render completo
-  setTimeout(() => { wrap.scrollTop = wrap.scrollHeight; }, 50);
-  requestAnimationFrame(() => { wrap.scrollTop = wrap.scrollHeight; });
   // actualizar no leídos
   conversacionesData = conversacionesData.map(c => c.telefono === tel ? {...c, no_leidos: 0} : c);
   renderConversaciones(conversacionesData);
@@ -859,15 +856,22 @@ async function renderChat(tel, limit = 500) {
   if (badge) { badge.textContent = total; badge.style.display = total ? 'inline' : 'none'; }
 }
 
-// Auto-refresh del chat activo cada 3 segundos
+// Auto-refresh del chat activo cada 5 segundos - mantiene posicion del scroll
 setInterval(async () => {
   if (telActivo) {
     const wrap = document.getElementById('chat-messages');
-    const estaAbajo = wrap.scrollHeight - wrap.scrollTop - wrap.clientHeight < 100;
+    const scrollPos = wrap.scrollTop; // guardar posicion actual
+    const countAntes = wrap.children.length;
     await renderChat(telActivo);
-    if (estaAbajo) wrap.scrollTop = wrap.scrollHeight;
+    // Solo ir al fondo si llegaron mensajes nuevos
+    const countDespues = wrap.children.length;
+    if (countDespues > countAntes) {
+      wrap.scrollTop = wrap.scrollHeight;
+    } else {
+      wrap.scrollTop = scrollPos; // restaurar posicion
+    }
   }
-}, 3000);
+}, 5000);
 
 async function sendManual() {
   const input = document.getElementById('chat-input');
