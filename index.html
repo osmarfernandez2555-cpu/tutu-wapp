@@ -833,8 +833,8 @@ async function abrirConversacion(tel, nombre, telefono) {
   renderConversaciones(conversacionesData);
 }
 
-async function renderChat(tel) {
-  const d = await api('GET', `/api/bandeja/${tel}`);
+async function renderChat(tel, limit = 500) {
+  const d = await api('GET', `/api/bandeja/${tel}?limit=${limit}`);
   const wrap = document.getElementById('chat-messages');
   if (!d.msgs?.length) { wrap.innerHTML = '<div style="text-align:center;color:var(--muted);font-size:12px;margin-top:20px">Sin mensajes aún</div>'; return; }
   wrap.innerHTML = d.msgs.map(m => {
@@ -848,7 +848,9 @@ async function renderChat(tel) {
       </div>
     </div>`;
   }).join('');
-  wrap.scrollTop = wrap.scrollHeight;
+  // Forzar scroll al fondo con delay para asegurar render completo
+  setTimeout(() => { wrap.scrollTop = wrap.scrollHeight; }, 50);
+  requestAnimationFrame(() => { wrap.scrollTop = wrap.scrollHeight; });
   // actualizar no leídos
   conversacionesData = conversacionesData.map(c => c.telefono === tel ? {...c, no_leidos: 0} : c);
   renderConversaciones(conversacionesData);
@@ -856,6 +858,16 @@ async function renderChat(tel) {
   const badge = document.getElementById('badge-noleidos');
   if (badge) { badge.textContent = total; badge.style.display = total ? 'inline' : 'none'; }
 }
+
+// Auto-refresh del chat activo cada 3 segundos
+setInterval(async () => {
+  if (telActivo) {
+    const wrap = document.getElementById('chat-messages');
+    const estaAbajo = wrap.scrollHeight - wrap.scrollTop - wrap.clientHeight < 100;
+    await renderChat(telActivo);
+    if (estaAbajo) wrap.scrollTop = wrap.scrollHeight;
+  }
+}, 3000);
 
 async function sendManual() {
   const input = document.getElementById('chat-input');
