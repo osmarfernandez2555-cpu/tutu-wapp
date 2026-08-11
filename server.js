@@ -14,6 +14,11 @@ const TUTU_BOT_URL    = process.env.TUTU_BOT_URL    || 'https://tutu-chat-agent-
 const EVO_URL         = process.env.EVO_URL         || 'https://evolution-api-production-a132.up.railway.app';
 const EVO_APIKEY      = process.env.EVO_APIKEY      || 'b0aeeb8fd07ecb732ef096d805087cab8c155b57c46ec6086b036615ab314605';
 const EVO_INSTANCE    = process.env.EVO_INSTANCE    || 'tutu';
+// Bot de VENTA
+const EVO_URL2      = process.env.EVO_URL2      || 'https://evolution-api-production-8e853.up.railway.app';
+const EVO_APIKEY2   = process.env.EVO_APIKEY2   || '6f05426a2ab6e8508712211d4910251bde35070caa60cdce0e14a20157d460ce';
+const EVO_INSTANCE2 = process.env.EVO_INSTANCE2 || 'tutu-venta';
+const TUTU_VENTA_URL = process.env.TUTU_VENTA_URL || 'https://tutu-ventas-production.up.railway.app';
 const conversaciones  = {};
 const cooldowns       = {}; // evita procesar multiples imagenes seguidas
 const COOLDOWN_MS     = 10000; // 10 segundos entre respuestas por numero
@@ -36,6 +41,7 @@ db.exec(`
   CREATE TABLE IF NOT EXISTS tanda_contactos (id INTEGER PRIMARY KEY AUTOINCREMENT, tanda_id INTEGER, contact_id INTEGER, status TEXT DEFAULT 'pendiente', enviado_at DATETIME, error_msg TEXT);
   CREATE TABLE IF NOT EXISTS historial (id INTEGER PRIMARY KEY AUTOINCREMENT, tanda_id INTEGER, contact_id INTEGER, telefono TEXT, nombre TEXT, status TEXT, error_msg TEXT, sent_at DATETIME DEFAULT CURRENT_TIMESTAMP);
   CREATE TABLE IF NOT EXISTS mensajes (id INTEGER PRIMARY KEY AUTOINCREMENT, telefono TEXT NOT NULL, nombre TEXT, direccion TEXT NOT NULL, contenido TEXT NOT NULL, tipo TEXT DEFAULT 'texto', leido INTEGER DEFAULT 0, created_at DATETIME DEFAULT CURRENT_TIMESTAMP);
+  CREATE TABLE IF NOT EXISTS mensajes_venta (id INTEGER PRIMARY KEY AUTOINCREMENT, telefono TEXT NOT NULL, nombre TEXT, direccion TEXT NOT NULL, contenido TEXT NOT NULL, tipo TEXT DEFAULT 'texto', leido INTEGER DEFAULT 0, created_at DATETIME DEFAULT CURRENT_TIMESTAMP);
   CREATE TABLE IF NOT EXISTS email_contacts (id INTEGER PRIMARY KEY AUTOINCREMENT, nombre TEXT NOT NULL, email TEXT NOT NULL UNIQUE, telefono TEXT, tags TEXT DEFAULT '', status TEXT DEFAULT 'pendiente', created_at DATETIME DEFAULT CURRENT_TIMESTAMP);
   CREATE TABLE IF NOT EXISTS email_campanas (id INTEGER PRIMARY KEY AUTOINCREMENT, nombre TEXT NOT NULL, asunto TEXT NOT NULL, cuerpo_html TEXT NOT NULL, from_name TEXT DEFAULT 'Tutu Automotores', reply_to TEXT, delay_segundos INTEGER DEFAULT 5, max_por_dia INTEGER DEFAULT 300, status TEXT DEFAULT 'pendiente', total INTEGER DEFAULT 0, enviados INTEGER DEFAULT 0, fallidos INTEGER DEFAULT 0, created_at DATETIME DEFAULT CURRENT_TIMESTAMP);
   CREATE TABLE IF NOT EXISTS email_campana_contactos (id INTEGER PRIMARY KEY AUTOINCREMENT, campana_id INTEGER, contact_id INTEGER, status TEXT DEFAULT 'pendiente', enviado_at DATETIME, error_msg TEXT);
@@ -62,6 +68,23 @@ async function evoSendText(telefono, texto) {
     body: JSON.stringify({ number: '54' + telefono, text: texto })
   });
   return r.json();
+}
+
+async function evoSendText2(telefono, texto) {
+  const r = await fetch(`${EVO_URL2}/message/sendText/${EVO_INSTANCE2}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'apikey': EVO_APIKEY2 },
+    body: JSON.stringify({ number: '54' + telefono, text: texto })
+  });
+  return r.json();
+}
+
+async function evoStatus2() {
+  try {
+    const r = await fetch(`${EVO_URL2}/instance/connectionState/${EVO_INSTANCE2}`, { headers: { 'apikey': EVO_APIKEY2 } });
+    const d = await r.json();
+    return d.instance?.state || 'unknown';
+  } catch(e) { return 'error'; }
 }
 
 async function evoSendImage(telefono, imageBase64, caption) {
@@ -151,6 +174,44 @@ app.post('/webhook/evolution', async (req, res) => {
 });
 
 // ── WP STATUS (usando Evolution API) ─────────────────────────────────────────
+// ── Webhook Bot de VENTA ─────────────────────────────────────────────────────
+app.post('/webhook/venta', async (req, res) => {
+  res.sendStatus(200);
+  try {
+    const body = req.body;
+    if (!body || body.event !== 'messages.upsert') return;
+    const msg = body.data;
+    if (!msg || msg.key?.fromMe) return;
+    if (msg.key?.remoteJid?.endsWith('@g.us')) return;
+    const esImagen = !!msg.message?.imageMessage;
+    const contenido = msg.message?.conversation || msg.message?.extendedTextMessage?.text || msg.message?.imageMessage?.caption || '';
+    if (!esImagen && (!contenido || contenido.length > 2000)) return;
+    const tel = msg.key.remoteJid.replace('@s.whatsapp.net','').replace('@c.us','').replace(/[^0-9]/g,'').replace(/^54/,'');
+    if (!tel || tel.length < 8) return;
+    const ahoraV = Date.now();
+    if (esImagen && cooldowns['v_'+tel] && ahoraV - cooldowns['v_'+tel] < COOLDOWN_MS) return;
+    if (esImagen) cooldowns['v_'+tel] = ahoraV;
+    const nombre = msg.pushName || tel;
+    const mensajeParaBot = esImagen ? '[El cliente envió una foto]' : contenido;
+    db.prepare("INSERT INTO mensajes_venta (telefono, nombre, direccion, contenido, tipo) VALUES (?,?,?,?,?)").run(tel, nombre, 'entrante', contenido || '[foto]', esImagen ? 'imagen' : 'texto');
+    console.log(`[VENTA] <- ${nombre} (${tel}): ${mensajeParaBot.slice(0,50)}`);
+    try {
+      const r = await fetch(`${TUTU_VENTA_URL}/api/chat`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ messages: [{ role: 'user', content: mensajeParaBot }], sessionId: 'wa_venta_' + tel }),
+        signal: AbortSignal.timeout(30000)
+      });
+      const data = await r.json();
+      if (data.error) throw new Error(data.error);
+      const respuesta = data.message;
+      if (!respuesta) return;
+      await evoSendText2(tel, respuesta);
+      db.prepare("INSERT INTO mensajes_venta (telefono, nombre, direccion, contenido, tipo) VALUES (?,?,?,?,?)").run(tel, nombre, 'saliente', respuesta, 'texto');
+      console.log(`[VENTA BOT] -> ${nombre}: ${respuesta.slice(0,60)}`);
+    } catch(e) { console.error('[VENTA BOT] Error:', e.message); }
+  } catch(e) { console.error('[VENTA WEBHOOK] Error:', e.message); }
+});
+
 app.get('/api/wp/status', auth, async (req, res) => {
   const state = await evoStatus();
   res.json({ status: state === 'open' ? 'conectado' : state, qr: null });
@@ -290,6 +351,12 @@ app.get('/api/stats', auth, async (req, res) => {
   const state = await evoStatus();
   res.json({ total_contacts: db.prepare('SELECT COUNT(*) as c FROM contacts').get().c, pendientes: db.prepare("SELECT COUNT(*) as c FROM contacts WHERE status='pendiente'").get().c, enviados: db.prepare("SELECT COUNT(*) as c FROM contacts WHERE status='enviado'").get().c, total_tandas: db.prepare('SELECT COUNT(*) as c FROM tandas').get().c, hoy: db.prepare("SELECT COUNT(*) as c FROM historial WHERE date(sent_at)=date('now')").get().c, wp_status: state === 'open' ? 'conectado' : state, no_leidos: db.prepare("SELECT COUNT(*) as c FROM mensajes WHERE leido=0 AND direccion='entrante'").get().c, email_contacts: db.prepare('SELECT COUNT(*) as c FROM email_contacts').get().c, email_pendientes: db.prepare("SELECT COUNT(*) as c FROM email_contacts WHERE status='pendiente'").get().c, email_enviados: db.prepare("SELECT COUNT(*) as c FROM email_contacts WHERE status='enviado'").get().c, email_hoy: db.prepare("SELECT COUNT(*) as c FROM email_historial WHERE date(sent_at)=date('now')").get().c, email_config: !!emailTransporter, bot_activo: true, bot_url: TUTU_BOT_URL, bot_conversaciones: Object.keys(conversaciones).length });
 });
+
+// ── BANDEJA VENTA ────────────────────────────────────────────────────────────
+app.get('/api/bandeja-venta', auth, (req, res) => { res.json(db.prepare("SELECT m.telefono, m.nombre, MAX(m.created_at) as ultimo_at, (SELECT contenido FROM mensajes_venta WHERE telefono = m.telefono ORDER BY id DESC LIMIT 1) as ultimo_msg, (SELECT direccion FROM mensajes_venta WHERE telefono = m.telefono ORDER BY id DESC LIMIT 1) as ultima_dir, SUM(CASE WHEN m.leido = 0 AND m.direccion = 'entrante' THEN 1 ELSE 0 END) as no_leidos FROM mensajes_venta m GROUP BY m.telefono ORDER BY ultimo_at DESC LIMIT 500").all()); });
+app.get('/api/bandeja-venta/:telefono', auth, (req, res) => { const tel = req.params.telefono.replace(/\D/g,''); const limit = Math.min(parseInt(req.query.limit)||500,1000); db.prepare("UPDATE mensajes_venta SET leido = 1 WHERE telefono = ? AND direccion = 'entrante'").run(tel); res.json({ msgs: db.prepare("SELECT * FROM mensajes_venta WHERE telefono = ? ORDER BY id ASC LIMIT ?").all(tel, limit), contacto: db.prepare("SELECT * FROM contacts WHERE telefono = ?").get(tel) }); });
+app.post('/api/bandeja-venta/:telefono/send', auth, async (req, res) => { const tel = req.params.telefono.replace(/\D/g,''); const { mensaje } = req.body; if (!mensaje) return res.status(400).json({ error: 'Mensaje vacio' }); try { await evoSendText2(tel, mensaje); const contacto = db.prepare("SELECT nombre FROM contacts WHERE telefono = ?").get(tel); db.prepare("INSERT INTO mensajes_venta (telefono, nombre, direccion, contenido, tipo) VALUES (?,?,?,?,?)").run(tel, contacto?.nombre||tel, 'saliente', mensaje, 'texto'); res.json({ ok: true }); } catch(e) { res.status(400).json({ error: e.message }); } });
+app.get('/api/bandeja-venta/noleidos/count', auth, (req, res) => { res.json({ count: db.prepare("SELECT COUNT(*) as c FROM mensajes_venta WHERE leido = 0 AND direccion = 'entrante'").get().c }); });
 
 app.get('/health', (_, res) => res.json({ status: 'ok', evo: EVO_URL, instance: EVO_INSTANCE }));
 
