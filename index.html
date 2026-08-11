@@ -321,7 +321,39 @@
       </div>
 
       <!-- EMAIL CONTACTOS -->
-      <div id="panel-email-contactos" class="panel">
+      <div 
+id="panel-bandeja-venta" class="panel">
+        <div style="display:grid;grid-template-columns:280px 1fr;gap:0;height:calc(100vh - 120px);border:1px solid var(--border);border-radius:var(--radius);overflow:hidden;background:var(--card);min-height:0">
+          <!-- Lista conversaciones -->
+          <div style="border-right:1px solid var(--border);display:flex;flex-direction:column">
+            <div style="padding:12px;border-bottom:1px solid var(--border)">
+              <input id="bandeja-search" placeholder="Buscar conversación..." style="width:100%;font-size:12px" oninput="filterConversaciones()">
+            </div>
+            <div id="conversaciones-list-venta" style="flex:1;overflow-y:auto"></div>
+          </div>
+          <!-- Ventana de chat -->
+          <div style="display:flex;flex-direction:column;min-height:0;overflow:hidden;flex:1">
+            <div id="chat-header" style="padding:12px 16px;border-bottom:1px solid var(--border);background:var(--bg);display:flex;align-items:center;gap:10px">
+              <div id="chat-avatar" style="width:36px;height:36px;border-radius:50%;background:var(--green);display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:700;color:#fff;flex-shrink:0">—</div>
+              <div>
+                <div id="chat-nombre" style="font-weight:600;font-size:14px">Seleccioná una conversación</div>
+                <div id="chat-tel" style="font-size:11px;color:var(--muted)"></div>
+              </div>
+            </div>
+            <div id="chat-messages-venta" style="flex:1;overflow-y:scroll;padding:16px;display:flex;flex-direction:column;gap:8px;background:#f0f2f5;min-height:0">
+              <div style="text-align:center;color:var(--muted);font-size:13px;margin-top:40px">← Seleccioná una conversación</div>
+            </div>
+            <div id="chat-input-wrap" style="padding:10px 12px;border-top:1px solid var(--border);display:flex;gap:8px;background:var(--card)">
+              <input id="chat-input" placeholder="Escribí un mensaje..." style="flex:1;font-size:13px" onkeydown="if(event.key==='Enter')sendManual()" disabled>
+              <button class="btn btn-green btn-sm" onclick="sendManualVenta()" id="send-manual-btn" disabled>Enviar</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- EMAIL CONTACTOS -->
+      <div 
+id="panel-email-contactos" class="panel">
         <div class="card">
           <div class="card-title">Importar CSV de emails</div>
           <div class="alert alert-info">📋 CSV con columnas: <strong>nombre, email, telefono (opcional), tags (opcional)</strong></div>
@@ -470,7 +502,7 @@ async function api(method, path, body) {
 }
 
 // ─── NAV ──────────────────────────────────────────────────────────────────────
-const titles = { dashboard:'Dashboard', contactos:'Contactos', tandas:'Tandas de envío', 'nueva-tanda':'Nueva tanda', historial:'Historial', whatsapp:'WhatsApp' };
+const titles = { dashboard:'Dashboard', contactos:'Contactos', tandas:'Tandas de envío', 'nueva-tanda':'Nueva tanda', historial:'Historial', whatsapp:'WhatsApp', bandeja:'Bandeja de mensajes', 'bandeja-venta':'Bandeja de Venta 🚗' };
 function goTo(p) {
   document.querySelectorAll('.panel').forEach(x => x.classList.remove('active'));
   document.querySelectorAll('.nav-item').forEach(x => x.classList.remove('active'));
@@ -483,6 +515,8 @@ function goTo(p) {
   if (p === 'historial') loadHistorial();
   if (p === 'whatsapp') loadWPPanel();
   if (p === 'nueva-tanda') updatePreview();
+  if (p === 'bandeja') loadBandeja();
+  if (p === 'bandeja-venta') loadBandejaVenta();
 }
 
 // ─── STATS ────────────────────────────────────────────────────────────────────
@@ -1134,6 +1168,85 @@ document.addEventListener('keydown', e => { if (e.key === 'Escape') closeModal()
 // ─── INIT ──────────────────────────────────────────────────────────────────────
 loadStats();
 setInterval(() => { loadStats(); loadSendProgress(); }, 8000);
+
+
+// ── BANDEJA VENTA ─────────────────────────────────────────────────────────────
+let telActivoVenta = null;
+let conversacionesVentaData = [];
+
+async function loadBandejaVenta() {
+  const rows = await api('GET', '/api/bandeja-venta');
+  conversacionesVentaData = rows || [];
+  renderConversacionesVenta(conversacionesVentaData);
+  const total = conversacionesVentaData.reduce((s, r) => s + (r.no_leidos || 0), 0);
+  const badge = document.getElementById('badge-venta');
+  if (badge) { badge.textContent = total; badge.style.display = total ? 'inline' : 'none'; }
+}
+
+function renderConversacionesVenta(rows) {
+  const list = document.getElementById('conversaciones-list-venta');
+  if (!list || !rows) return;
+  if (!rows.length) { list.innerHTML = '<div style="text-align:center;color:#999;font-size:12px;padding:20px">Sin conversaciones</div>'; return; }
+  list.innerHTML = rows.map(c => `<div class="conv-item ${telActivoVenta===c.telefono?'active':''}" onclick="abrirChatVenta('${c.telefono}','${(c.nombre||c.telefono).replace(/'/g,"\\'")}')">
+    <div style="display:flex;justify-content:space-between;align-items:center">
+      <strong style="font-size:13px">${c.nombre||c.telefono}</strong>
+      ${c.no_leidos>0?`<span style="background:#e74c3c;color:#fff;font-size:10px;padding:1px 6px;border-radius:10px">${c.no_leidos}</span>`:''}
+    </div>
+    <div style="font-size:11px;color:#999;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${c.ultima_dir==='saliente'?'→ ':''} ${c.ultimo_msg||''}</div>
+  </div>`).join('');
+}
+
+async function abrirChatVenta(tel, nombre) {
+  telActivoVenta = tel;
+  const hdr = document.getElementById('chat-header-info-venta');
+  if (hdr) hdr.innerHTML = `<strong>${nombre}</strong><br><small style="color:#999">${tel}</small>`;
+  const ia = document.getElementById('chat-input-area-venta');
+  if (ia) ia.style.display = 'flex';
+  await renderChatVenta(tel);
+  renderConversacionesVenta(conversacionesVentaData);
+}
+
+async function renderChatVenta(tel, limit=500) {
+  const d = await api('GET', `/api/bandeja-venta/${tel}?limit=${limit}`);
+  const wrap = document.getElementById('chat-messages-venta');
+  if (!wrap || !d?.msgs) return;
+  const scrollPos = wrap.scrollTop;
+  const countAntes = wrap.children.length;
+  wrap.innerHTML = d.msgs.map(m => {
+    const esS = m.direccion === 'saliente';
+    return `<div style="display:flex;justify-content:${esS?'flex-end':'flex-start'};margin-bottom:6px">
+      <div style="max-width:70%;background:${esS?'#dcf8c6':'#fff'};border-radius:10px;padding:8px 12px;font-size:13px;box-shadow:0 1px 2px rgba(0,0,0,0.1)">
+        ${m.contenido}
+        <div style="font-size:10px;color:#999;margin-top:2px;text-align:right">${new Date(m.created_at).toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit'})}</div>
+      </div>
+    </div>`;
+  }).join('');
+  if (wrap.children.length > countAntes) wrap.scrollTop = wrap.scrollHeight;
+  else wrap.scrollTop = scrollPos;
+}
+
+async function sendManualVenta() {
+  if (!telActivoVenta) return;
+  const inp = document.getElementById('msg-input-venta');
+  const msg = inp?.value?.trim();
+  if (!msg) return;
+  await api('POST', `/api/bandeja-venta/${telActivoVenta}/send`, { mensaje: msg });
+  inp.value = '';
+  await renderChatVenta(telActivoVenta);
+}
+
+setInterval(async () => {
+  if (document.getElementById('panel-bandeja-venta')?.classList.contains('active')) {
+    await loadBandejaVenta();
+    if (telActivoVenta) await renderChatVenta(telActivoVenta);
+  } else {
+    const nr = await api('GET', '/api/bandeja-venta/noleidos/count');
+    const badge = document.getElementById('badge-venta');
+    if (badge) { badge.style.display = nr?.count > 0 ? 'inline' : 'none'; badge.textContent = nr?.count || ''; }
+  }
+}, 5000);
+// ── FIN BANDEJA VENTA ─────────────────────────────────────────────────────────
+
 </script>
 
 <!-- MODAL EDITAR CONTACTO -->
