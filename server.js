@@ -16,7 +16,7 @@ const EVO_APIKEY      = process.env.EVO_APIKEY      || 'b0aeeb8fd07ecb732ef096d8
 const EVO_INSTANCE    = process.env.EVO_INSTANCE    || 'tutu';
 // Bot de VENTA
 const EVO_URL2      = process.env.EVO_URL2      || 'https://evolution-api-production-8e853.up.railway.app';
-const EVO_APIKEY2   = process.env.EVO_APIKEY2   || '6f05426a2ab6e8508712211d4910251bde35070caa60cdce0e14a20157d460ce';
+const EVO_APIKEY2   = process.env.EVO_APIKEY2   || 'tutuventas2026';
 const EVO_INSTANCE2 = process.env.EVO_INSTANCE2 || 'tutu-venta';
 const TUTU_VENTA_URL = process.env.TUTU_VENTA_URL || 'https://tutu-ventas-production.up.railway.app';
 const conversaciones  = {};
@@ -71,12 +71,17 @@ async function evoSendText(telefono, texto) {
 }
 
 async function evoSendText2(telefono, texto) {
-  const r = await fetch(`${EVO_URL2}/message/sendText/${EVO_INSTANCE2}`, {
+  const url = `${EVO_URL2}/message/sendText/${EVO_INSTANCE2}`;
+  const body = { number: '54' + telefono, text: texto };
+  console.log('[EVO2] Enviando a:', url, '| number:', body.number, '| apikey:', EVO_APIKEY2.slice(0,8));
+  const r = await fetch(url, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', 'apikey': EVO_APIKEY2 },
-    body: JSON.stringify({ number: '54' + telefono, text: texto })
+    body: JSON.stringify(body)
   });
-  return r.json();
+  const result = await r.json();
+  console.log('[EVO2] Respuesta:', JSON.stringify(result).slice(0,100));
+  return result;
 }
 
 async function evoStatus2() {
