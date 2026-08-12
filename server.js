@@ -200,16 +200,23 @@ app.post('/webhook/venta', async (req, res) => {
     const mensajeParaBot = esImagen ? '[El cliente envió una foto]' : contenido;
     db.prepare("INSERT INTO mensajes_venta (telefono, nombre, direccion, contenido, tipo) VALUES (?,?,?,?,?)").run(tel, nombre, 'entrante', contenido || '[foto]', esImagen ? 'imagen' : 'texto');
     console.log(`[VENTA] <- ${nombre} (${tel}): ${mensajeParaBot.slice(0,50)}`);
+    // Historial de conversacion de venta por numero
+    if (!conversaciones['v_'+tel]) conversaciones['v_'+tel] = [];
+    conversaciones['v_'+tel].push({ role: 'user', content: mensajeParaBot });
+    if (conversaciones['v_'+tel].length > 20) conversaciones['v_'+tel] = conversaciones['v_'+tel].slice(-20);
+    const mensajesVenta = conversaciones['v_'+tel].map(m => ({ role: m.role, content: m.content.slice(0,500) }));
+
     try {
       const r = await fetch(`${TUTU_VENTA_URL}/api/chat`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ messages: [{ role: 'user', content: mensajeParaBot }], sessionId: 'wa_venta_' + tel }),
+        body: JSON.stringify({ messages: mensajesVenta, sessionId: 'wa_venta_' + tel }),
         signal: AbortSignal.timeout(30000)
       });
       const data = await r.json();
       if (data.error) throw new Error(data.error);
       const respuesta = data.message;
       if (!respuesta) return;
+      conversaciones['v_'+tel].push({ role: 'assistant', content: respuesta });
       await evoSendText2(tel, respuesta);
       db.prepare("INSERT INTO mensajes_venta (telefono, nombre, direccion, contenido, tipo) VALUES (?,?,?,?,?)").run(tel, nombre, 'saliente', respuesta, 'texto');
       console.log(`[VENTA BOT] -> ${nombre}: ${respuesta.slice(0,60)}`);
