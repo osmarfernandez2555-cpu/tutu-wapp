@@ -556,37 +556,36 @@ async function loadResumenCompra() {
   const lista = document.getElementById('resumen-compra-lista');
   lista.innerHTML = '<div style="color:var(--muted);font-size:13px;text-align:center;padding:10px">Cargando...</div>';
   try {
-    // Obtener conversaciones de compra de la bandeja
     const d = await api('GET', '/api/bandeja');
-    if (!d.length) { lista.innerHTML = '<div style="color:var(--muted);font-size:13px;text-align:center;padding:10px">Sin conversaciones</div>'; return; }
-    
+    if (!d || !d.length) { lista.innerHTML = '<div style="color:var(--muted);font-size:13px;text-align:center;padding:10px">Sin conversaciones</div>'; return; }
     let html = '';
     for (const conv of d.slice(0, 30)) {
-      // Obtener mensajes de esta conversacion
-      const msgs = await api('GET', `/api/bandeja/${conv.telefono}`);
+      const msgs = await api('GET', '/api/bandeja/' + conv.telefono);
       const todos = msgs.msgs || [];
-      
-      // Extraer datos del flujo de Tutusita
-      var autoData = extraerDatosConversacion(todos, 'compra');
-      
-      var tel = conv.telefono.replace(/^54/, '').replace(/^9/, '');
-      html += `<div style="background:var(--card);border:1px solid var(--border);border-radius:8px;padding:10px 14px;font-size:12px">
-        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px">
-          <strong style="font-size:13px">${conv.nombre || conv.telefono}</strong>
-          <span style="color:var(--muted);font-size:11px">${conv.telefono}</span>
-        </div>
-        <div style="color:var(--muted)">
-          ${autoData.auto ? '🚗 <strong>' + autoData.auto + '</strong>' : ''}
-          ${autoData.anio ? ' · ' + autoData.anio : ''}
-          ${autoData.presupuesto ? ' · 💰 ' + autoData.presupuesto : ''}
-        </div>
-        ${autoData.nombre ? '<div style="margin-top:2px;color:var(--muted)">👤 ' + autoData.nombre + '</div>' : ''}
-        <div style="margin-top:6px;display:flex;gap:6px;flex-wrap:wrap">
-          <button onclick="navigator.clipboard.writeText('${autoData.nombre || conv.nombre} ${tel} ${autoData.auto || ''} ${autoData.anio || ''}')" style="background:#1a6dd4;color:#fff;border:none;border-radius:5px;padding:3px 8px;font-size:11px;cursor:pointer">📋 Copiar para Match</button>
-        </div>
-      </div>`;
+      const autoData = extraerDatosConversacion(todos, 'compra');
+      const nombreDisplay = autoData.nombre || conv.nombre || conv.telefono;
+      const tel = conv.telefono.replace(/^54/, '').replace(/^9/, '');
+      html += '<div style="background:var(--card);border:1px solid var(--border);border-radius:8px;padding:10px 14px;font-size:12px">';
+      html += '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px">';
+      html += '<strong style="font-size:13px">' + nombreDisplay + '</strong>';
+      html += '<span style="color:var(--muted);font-size:11px">' + tel + '</span></div>';
+      html += '<div style="color:var(--muted)">';
+      if (autoData.auto) html += '&#128663; <strong>' + autoData.auto + '</strong>';
+      if (autoData.anio) html += ' &middot; ' + autoData.anio;
+      if (autoData.presupuesto) html += ' &middot; &#128176; ' + autoData.presupuesto;
+      html += '</div>';
+      html += '<div style="margin-top:6px">';
+      html += '<button class="btn-copy-match" data-txt="' + (nombreDisplay + '	' + tel + '	' + (autoData.auto || '') + (autoData.anio ? ' ' + autoData.anio : '')).replace(/"/g,'') + '" style="background:#1a6dd4;color:#fff;border:none;border-radius:5px;padding:3px 8px;font-size:11px;cursor:pointer">Copiar para Match</button>';
+      html += '</div></div>';
     }
     lista.innerHTML = html || '<div style="color:var(--muted);font-size:13px;text-align:center;padding:10px">Sin datos</div>';
+    lista.querySelectorAll('.btn-copy-match').forEach(function(btn) {
+      btn.addEventListener('click', function() {
+        navigator.clipboard.writeText(btn.getAttribute('data-txt')).catch(function(){});
+        btn.textContent = 'Copiado!';
+        setTimeout(function(){ btn.textContent = 'Copiar para Match'; }, 2000);
+      });
+    });
   } catch(e) {
     lista.innerHTML = '<div style="color:#e74c3c;font-size:13px;padding:10px">Error: ' + e.message + '</div>';
   }
@@ -597,33 +596,42 @@ async function loadResumenVenta() {
   lista.innerHTML = '<div style="color:var(--muted);font-size:13px;text-align:center;padding:10px">Cargando...</div>';
   try {
     const d = await api('GET', '/api/bandeja-venta');
-    if (!d.length) { lista.innerHTML = '<div style="color:var(--muted);font-size:13px;text-align:center;padding:10px">Sin conversaciones</div>'; return; }
-    
+    if (!d || !d.length) { lista.innerHTML = '<div style="color:var(--muted);font-size:13px;text-align:center;padding:10px">Sin conversaciones</div>'; return; }
     let html = '';
     for (const conv of d.slice(0, 30)) {
-      const msgs = await api('GET', `/api/bandeja-venta/${conv.telefono}`);
+      const msgs = await api('GET', '/api/bandeja-venta/' + conv.telefono);
       const todos = msgs.msgs || [];
-      var autoData = extraerDatosConversacion(todos, 'venta');
-      
-      var stockTxt = [autoData.auto, autoData.anio, autoData.km, autoData.precio].filter(Boolean).join(' | ');
-      
-      html += `<div style="background:var(--card);border:1px solid var(--border);border-radius:8px;padding:10px 14px;font-size:12px">
-        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px">
-          <strong style="font-size:13px">${autoData.nombre || conv.nombre || conv.telefono}</strong>
-          <span style="color:var(--muted);font-size:11px">${conv.telefono}</span>
-        </div>
-        <div style="color:var(--muted)">
-          ${autoData.auto ? '🚗 <strong>' + autoData.auto + '</strong>' : ''}
-          ${autoData.anio ? ' · ' + autoData.anio : ''}
-          ${autoData.km ? ' · 🛣️ ' + autoData.km : ''}
-          ${autoData.precio ? ' · 💰 ' + autoData.precio : ''}
-        </div>
-        <div style="margin-top:6px;display:flex;gap:6px;flex-wrap:wrap">
-          ${stockTxt ? '<button onclick="navigator.clipboard.writeText('' + stockTxt.replace(/'/g,"\'") + '')" style="background:#c8102e;color:#fff;border:none;border-radius:5px;padding:3px 8px;font-size:11px;cursor:pointer">📋 Copiar para Stock</button>' : ''}
-        </div>
-      </div>`;
+      const autoData = extraerDatosConversacion(todos, 'venta');
+      const partes = [autoData.auto, autoData.anio, autoData.km, autoData.precio].filter(Boolean);
+      const stockTxt = partes.join(' | ');
+      const nombreDisplay = autoData.nombre || conv.nombre || conv.telefono;
+      html += '<div style="background:var(--card);border:1px solid var(--border);border-radius:8px;padding:10px 14px;font-size:12px">';
+      html += '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px">';
+      html += '<strong style="font-size:13px">' + nombreDisplay + '</strong>';
+      html += '<span style="color:var(--muted);font-size:11px">' + conv.telefono + '</span></div>';
+      html += '<div style="color:var(--muted)">';
+      if (autoData.auto) html += '&#128663; <strong>' + autoData.auto + '</strong>';
+      if (autoData.anio) html += ' &middot; ' + autoData.anio;
+      if (autoData.km) html += ' &middot; &#128739; ' + autoData.km;
+      if (autoData.precio) html += ' &middot; &#128176; ' + autoData.precio;
+      html += '</div>';
+      if (stockTxt) {
+        html += '<div style="margin-top:6px">';
+        html += '<button class="btn-copy-stock" style="background:#c8102e;color:#fff;border:none;border-radius:5px;padding:3px 8px;font-size:11px;cursor:pointer">Copiar para Stock</button>';
+        html += '</div>';
+      }
+      html += '</div>';
     }
     lista.innerHTML = html || '<div style="color:var(--muted);font-size:13px;text-align:center;padding:10px">Sin datos</div>';
+    // Agregar eventos a los botones de copiar
+    lista.querySelectorAll('.btn-copy-stock').forEach(function(btn, i) {
+      btn.addEventListener('click', function() {
+        var items = lista.querySelectorAll('.btn-copy-stock');
+        navigator.clipboard.writeText(btn.closest('div[style]').querySelector('div[style*="muted"]').textContent.trim()).catch(function(){});
+        btn.textContent = 'Copiado!';
+        setTimeout(function(){ btn.textContent = 'Copiar para Stock'; }, 2000);
+      });
+    });
   } catch(e) {
     lista.innerHTML = '<div style="color:#e74c3c;font-size:13px;padding:10px">Error: ' + e.message + '</div>';
   }
