@@ -147,6 +147,36 @@
           <div class="stat"><div class="stat-n blue" id="s-email-hoy">—</div><div class="stat-l">Emails hoy</div></div>
         </div>
         <div id="send-progress-wrap"></div>
+
+        <!-- STATS DE MENSAJES -->
+        <div style="font-size:12px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:8px;margin-top:4px">Conversaciones Bot</div>
+        <div class="stats-row">
+          <div class="stat"><div class="stat-n blue" id="s-msgs-compra">—</div><div class="stat-l">Mensajes compra</div></div>
+          <div class="stat"><div class="stat-n orange" id="s-msgs-hoy-compra">—</div><div class="stat-l">Compra hoy</div></div>
+          <div class="stat"><div class="stat-n green" id="s-conv-compra">—</div><div class="stat-l">Contactos compra</div></div>
+          <div class="stat"><div class="stat-n blue" id="s-msgs-venta">—</div><div class="stat-l">Mensajes venta</div></div>
+          <div class="stat"><div class="stat-n orange" id="s-msgs-hoy-venta">—</div><div class="stat-l">Venta hoy</div></div>
+          <div class="stat"><div class="stat-n green" id="s-conv-venta">—</div><div class="stat-l">Contactos venta</div></div>
+        </div>
+
+        <!-- RESUMEN COMPRA -->
+        <div style="font-size:12px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:8px;margin-top:12px">
+          Resumen Compra — Clientes que buscan auto
+          <button onclick="loadResumenCompra()" style="margin-left:10px;background:#1a6dd4;color:#fff;border:none;border-radius:6px;padding:3px 10px;font-size:11px;cursor:pointer">Actualizar</button>
+        </div>
+        <div id="resumen-compra-lista" style="display:flex;flex-direction:column;gap:6px;max-height:300px;overflow-y:auto;margin-bottom:12px">
+          <div style="color:var(--muted);font-size:13px;text-align:center;padding:10px">Click en Actualizar</div>
+        </div>
+
+        <!-- RESUMEN VENTA -->
+        <div style="font-size:12px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:8px;margin-top:4px">
+          Resumen Venta — Autos que quieren vender
+          <button onclick="loadResumenVenta()" style="margin-left:10px;background:#c8102e;color:#fff;border:none;border-radius:6px;padding:3px 10px;font-size:11px;cursor:pointer">Actualizar</button>
+        </div>
+        <div id="resumen-venta-lista" style="display:flex;flex-direction:column;gap:6px;max-height:300px;overflow-y:auto;margin-bottom:12px">
+          <div style="color:var(--muted);font-size:13px;text-align:center;padding:10px">Click en Actualizar</div>
+        </div>
+
         <div class="card">
           <div class="card-title">Acciones rápidas</div>
           <div style="display:flex;gap:10px;flex-wrap:wrap">
@@ -521,6 +551,117 @@ function goTo(p) {
 }
 
 // ─── STATS ────────────────────────────────────────────────────────────────────
+// ── RESUMENES BOT ─────────────────────────────────────────────────────────────
+async function loadResumenCompra() {
+  const lista = document.getElementById('resumen-compra-lista');
+  lista.innerHTML = '<div style="color:var(--muted);font-size:13px;text-align:center;padding:10px">Cargando...</div>';
+  try {
+    // Obtener conversaciones de compra de la bandeja
+    const d = await api('GET', '/api/bandeja');
+    if (!d.length) { lista.innerHTML = '<div style="color:var(--muted);font-size:13px;text-align:center;padding:10px">Sin conversaciones</div>'; return; }
+    
+    let html = '';
+    for (const conv of d.slice(0, 30)) {
+      // Obtener mensajes de esta conversacion
+      const msgs = await api('GET', `/api/bandeja/${conv.telefono}`);
+      const todos = msgs.msgs || [];
+      
+      // Extraer datos del flujo de Tutusita
+      var autoData = extraerDatosConversacion(todos, 'compra');
+      
+      var tel = conv.telefono.replace(/^54/, '').replace(/^9/, '');
+      html += `<div style="background:var(--card);border:1px solid var(--border);border-radius:8px;padding:10px 14px;font-size:12px">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px">
+          <strong style="font-size:13px">${conv.nombre || conv.telefono}</strong>
+          <span style="color:var(--muted);font-size:11px">${conv.telefono}</span>
+        </div>
+        <div style="color:var(--muted)">
+          ${autoData.auto ? '🚗 <strong>' + autoData.auto + '</strong>' : ''}
+          ${autoData.anio ? ' · ' + autoData.anio : ''}
+          ${autoData.presupuesto ? ' · 💰 ' + autoData.presupuesto : ''}
+        </div>
+        ${autoData.nombre ? '<div style="margin-top:2px;color:var(--muted)">👤 ' + autoData.nombre + '</div>' : ''}
+        <div style="margin-top:6px;display:flex;gap:6px;flex-wrap:wrap">
+          <button onclick="navigator.clipboard.writeText('${autoData.nombre || conv.nombre} ${tel} ${autoData.auto || ''} ${autoData.anio || ''}')" style="background:#1a6dd4;color:#fff;border:none;border-radius:5px;padding:3px 8px;font-size:11px;cursor:pointer">📋 Copiar para Match</button>
+        </div>
+      </div>`;
+    }
+    lista.innerHTML = html || '<div style="color:var(--muted);font-size:13px;text-align:center;padding:10px">Sin datos</div>';
+  } catch(e) {
+    lista.innerHTML = '<div style="color:#e74c3c;font-size:13px;padding:10px">Error: ' + e.message + '</div>';
+  }
+}
+
+async function loadResumenVenta() {
+  const lista = document.getElementById('resumen-venta-lista');
+  lista.innerHTML = '<div style="color:var(--muted);font-size:13px;text-align:center;padding:10px">Cargando...</div>';
+  try {
+    const d = await api('GET', '/api/bandeja-venta');
+    if (!d.length) { lista.innerHTML = '<div style="color:var(--muted);font-size:13px;text-align:center;padding:10px">Sin conversaciones</div>'; return; }
+    
+    let html = '';
+    for (const conv of d.slice(0, 30)) {
+      const msgs = await api('GET', `/api/bandeja-venta/${conv.telefono}`);
+      const todos = msgs.msgs || [];
+      var autoData = extraerDatosConversacion(todos, 'venta');
+      
+      var stockTxt = [autoData.auto, autoData.anio, autoData.km, autoData.precio].filter(Boolean).join(' | ');
+      
+      html += `<div style="background:var(--card);border:1px solid var(--border);border-radius:8px;padding:10px 14px;font-size:12px">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px">
+          <strong style="font-size:13px">${autoData.nombre || conv.nombre || conv.telefono}</strong>
+          <span style="color:var(--muted);font-size:11px">${conv.telefono}</span>
+        </div>
+        <div style="color:var(--muted)">
+          ${autoData.auto ? '🚗 <strong>' + autoData.auto + '</strong>' : ''}
+          ${autoData.anio ? ' · ' + autoData.anio : ''}
+          ${autoData.km ? ' · 🛣️ ' + autoData.km : ''}
+          ${autoData.precio ? ' · 💰 ' + autoData.precio : ''}
+        </div>
+        <div style="margin-top:6px;display:flex;gap:6px;flex-wrap:wrap">
+          ${stockTxt ? '<button onclick="navigator.clipboard.writeText('' + stockTxt.replace(/'/g,"\'") + '')" style="background:#c8102e;color:#fff;border:none;border-radius:5px;padding:3px 8px;font-size:11px;cursor:pointer">📋 Copiar para Stock</button>' : ''}
+        </div>
+      </div>`;
+    }
+    lista.innerHTML = html || '<div style="color:var(--muted);font-size:13px;text-align:center;padding:10px">Sin datos</div>';
+  } catch(e) {
+    lista.innerHTML = '<div style="color:#e74c3c;font-size:13px;padding:10px">Error: ' + e.message + '</div>';
+  }
+}
+
+function extraerDatosConversacion(msgs, tipo) {
+  // Extraer datos del flujo de preguntas de Tutusita
+  var data = { auto: '', anio: '', presupuesto: '', nombre: '', km: '', precio: '' };
+  var userMsgs = msgs.filter(m => m.direccion === 'entrante').map(m => m.contenido);
+  var botMsgs = msgs.filter(m => m.direccion === 'saliente').map(m => m.contenido);
+  
+  for (var i = 0; i < botMsgs.length; i++) {
+    var bot = botMsgs[i] || '';
+    var respUser = userMsgs[i + 1] || userMsgs[i] || '';
+    
+    if (bot.includes('marca y modelo') || bot.includes('Cuál es la marca')) {
+      data.auto = respUser.slice(0, 50);
+    }
+    if (bot.includes('De qué año') || bot.includes('qué año')) {
+      data.anio = respUser.slice(0, 10);
+    }
+    if (bot.includes('dinero') || bot.includes('presupuesto') || bot.includes('Cuánto dinero')) {
+      data.presupuesto = respUser.slice(0, 30);
+    }
+    if (bot.includes('nombre') || bot.includes('Me decís tu nombre')) {
+      data.nombre = respUser.slice(0, 40);
+    }
+    if (bot.includes('kilómetros') || bot.includes('kilometros') || bot.includes('Cuántos km')) {
+      data.km = respUser.slice(0, 20);
+    }
+    if (bot.includes('pretendido') || bot.includes('precio') || bot.includes('esperás recibir')) {
+      data.precio = respUser.slice(0, 30);
+    }
+  }
+  return data;
+}
+// ── FIN RESUMENES BOT ─────────────────────────────────────────────────────────
+
 async function loadStats() {
   const d = await api('GET', '/api/stats');
   document.getElementById('s-total').textContent = d.total_contacts ?? '—';
@@ -528,6 +669,29 @@ async function loadStats() {
   document.getElementById('s-sent').textContent = d.enviados ?? '—';
   document.getElementById('s-hoy').textContent = d.hoy ?? '—';
   document.getElementById('s-tandas').textContent = d.total_tandas ?? '—';
+  // Stats mensajes bot
+  try {
+    const bandeja = await api('GET', '/api/bandeja');
+    const bandejaV = await api('GET', '/api/bandeja-venta');
+    const hoy = new Date().toISOString().slice(0,10);
+    
+    const totalMsgsC = bandeja.reduce((s,c) => s + (parseInt(c.total_msgs)||0), 0);
+    const convsHoyC = bandeja.filter(c => c.ultimo_at && c.ultimo_at.slice(0,10) === hoy).length;
+    
+    const el1 = document.getElementById('s-msgs-compra');
+    const el2 = document.getElementById('s-msgs-hoy-compra');
+    const el3 = document.getElementById('s-conv-compra');
+    const el4 = document.getElementById('s-msgs-venta');
+    const el5 = document.getElementById('s-msgs-hoy-venta');
+    const el6 = document.getElementById('s-conv-venta');
+    
+    if(el1) el1.textContent = bandeja.length + ' convs';
+    if(el2) el2.textContent = convsHoyC;
+    if(el3) el3.textContent = bandeja.length;
+    if(el4) el4.textContent = bandejaV.length + ' convs';
+    if(el5) el5.textContent = bandejaV.filter(c => c.ultimo_at && c.ultimo_at.slice(0,10) === hoy).length;
+    if(el6) el6.textContent = bandejaV.length;
+  } catch(e) {}
   // email stats
   const eg = document.getElementById('s-email-contacts');
   if (eg) eg.textContent = d.email_contacts ?? '—';
