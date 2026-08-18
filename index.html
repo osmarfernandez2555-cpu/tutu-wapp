@@ -106,6 +106,7 @@
       <div class="nav-item" onclick="goTo('historial')"><span class="nav-icon">📜</span> Historial</div>
       <div class="nav-item" onclick="goTo('bandeja')"><span class="nav-icon">💬</span> Bandeja <span id="badge-noleidos" style="display:none;background:#e74c3c;color:#fff;font-size:10px;padding:1px 6px;border-radius:10px;margin-left:4px"></span></div>
       <div class="nav-item" onclick="goTo('bandeja-venta')"><span class="nav-icon">🚗</span> Bandeja Venta <span id="badge-venta" style="display:none;background:#e74c3c;color:#fff;font-size:10px;padding:1px 6px;border-radius:10px;margin-left:4px"></span></div>
+      <div class="nav-item" onclick="goTo('consignacion')"><span class="nav-icon">🏠</span> Consignacion <span id="badge-consignacion" style="display:none;background:#e74c3c;color:#fff;font-size:10px;padding:1px 6px;border-radius:10px;margin-left:4px"></span></div>
       <div class="nav-item" onclick="goTo('whatsapp')"><span class="nav-icon">📲</span> WhatsApp</div>
       <div style="padding:8px 18px 4px;font-size:10px;color:rgba(255,255,255,0.25);text-transform:uppercase;letter-spacing:1px">Email</div>
       <div class="nav-item" onclick="goTo('email-contactos')"><span class="nav-icon">📧</span> Contactos email</div>
@@ -384,6 +385,39 @@ id="panel-bandeja-venta" class="panel">
 
       <!-- EMAIL CONTACTOS -->
       <div 
+
+id="panel-consignacion" class="panel">
+        <div style="display:grid;grid-template-columns:280px 1fr;gap:0;height:calc(100vh - 120px);border:1px solid var(--border);border-radius:var(--radius);overflow:hidden;background:var(--card);min-height:0">
+          <!-- Lista conversaciones -->
+          <div style="border-right:1px solid var(--border);display:flex;flex-direction:column">
+            <div style="padding:12px;border-bottom:1px solid var(--border)">
+              <input id="bandeja-search" placeholder="Buscar conversación..." style="width:100%;font-size:12px" oninput="filterConversaciones()">
+            </div>
+            <div id="conversaciones-list-consignacion" style="flex:1;overflow-y:auto"></div>
+          </div>
+          <!-- Ventana de chat -->
+          <div style="display:flex;flex-direction:column;min-height:0;overflow:hidden;flex:1">
+            <div id="chat-header" style="padding:12px 16px;border-bottom:1px solid var(--border);background:var(--bg);display:flex;align-items:center;gap:10px">
+              <div id="chat-avatar" style="width:36px;height:36px;border-radius:50%;background:var(--green);display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:700;color:#fff;flex-shrink:0">—</div>
+              <div>
+                <div id="chat-nombre" style="font-weight:600;font-size:14px">Seleccioná una conversación</div>
+                <div id="chat-tel" style="font-size:11px;color:var(--muted)"></div>
+              </div>
+            </div>
+            <div id="chat-messages-consignacion" style="flex:1;overflow-y:scroll;padding:16px;display:flex;flex-direction:column;gap:8px;background:#f0f2f5;min-height:0">
+              <div style="text-align:center;color:var(--muted);font-size:13px;margin-top:40px">← Seleccioná una conversación</div>
+            </div>
+            <div id="chat-input-wrap" style="padding:10px 12px;border-top:1px solid var(--border);display:flex;gap:8px;background:var(--card)">
+              <input id="chat-input" placeholder="Escribí un mensaje..." style="flex:1;font-size:13px" onkeydown="if(event.key==='Enter')sendManual()" disabled>
+              <button class="btn btn-green btn-sm" onclick="sendManualConsignacion()" id="send-manual-btn" disabled>Enviar</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- EMAIL CONTACTOS -->
+      <div 
+
 id="panel-email-contactos" class="panel">
         <div class="card">
           <div class="card-title">Importar CSV de emails</div>
@@ -533,7 +567,7 @@ async function api(method, path, body) {
 }
 
 // ─── NAV ──────────────────────────────────────────────────────────────────────
-const titles = { dashboard:'Dashboard', contactos:'Contactos', tandas:'Tandas de envío', 'nueva-tanda':'Nueva tanda', historial:'Historial', whatsapp:'WhatsApp', bandeja:'Bandeja de mensajes', 'bandeja-venta':'Bandeja de Venta 🚗' };
+const titles = { dashboard:'Dashboard', contactos:'Contactos', tandas:'Tandas de envío', 'nueva-tanda':'Nueva tanda', historial:'Historial', whatsapp:'WhatsApp', bandeja:'Bandeja de mensajes', 'bandeja-venta':'Bandeja de Venta 🚗', 'consignacion':'Consignacion 🏠' };
 function goTo(p) {
   document.querySelectorAll('.panel').forEach(x => x.classList.remove('active'));
   document.querySelectorAll('.nav-item').forEach(x => x.classList.remove('active'));
@@ -548,6 +582,7 @@ function goTo(p) {
   if (p === 'nueva-tanda') updatePreview();
   if (p === 'bandeja') loadBandeja();
   if (p === 'bandeja-venta') loadBandejaVenta();
+  if (p === 'consignacion') loadConsignacion();
 }
 
 // ─── STATS ────────────────────────────────────────────────────────────────────
@@ -1412,6 +1447,84 @@ async function renderChatVenta(tel, limit=500) {
   if (wrap.children.length > countAntes) wrap.scrollTop = wrap.scrollHeight;
   else wrap.scrollTop = scrollPos;
 }
+
+// ── CONSIGNACION ─────────────────────────────────────────────────────────────
+let telActivoConsignacion = null;
+let conversacionesConsignacionData = [];
+
+async function loadConsignacion() {
+  // Filtrar conversaciones de venta que contienen CONSIGNACION
+  const rows = await api('GET', '/api/bandeja-venta');
+  conversacionesConsignacionData = [];
+  for (const conv of (rows || [])) {
+    const msgs = await api('GET', `/api/bandeja-venta/${conv.telefono}`);
+    const todosMsgs = msgs.msgs || [];
+    const tieneConsign = todosMsgs.some(m =>
+      m.contenido && m.contenido.toUpperCase().includes('CONSIGNACION')
+    );
+    if (tieneConsign) conversacionesConsignacionData.push(conv);
+  }
+  renderConversacionesConsignacion(conversacionesConsignacionData);
+  const total = conversacionesConsignacionData.length;
+  const badge = document.getElementById('badge-consignacion');
+  if (badge) { badge.textContent = total; badge.style.display = total ? 'inline' : 'none'; }
+}
+
+function renderConversacionesConsignacion(rows) {
+  const list = document.getElementById('conversaciones-list-consignacion');
+  if (!list || !rows) return;
+  if (!rows.length) { list.innerHTML = '<div style="text-align:center;color:#999;font-size:12px;padding:20px">Sin consultas de consignacion</div>'; return; }
+  list.innerHTML = rows.map(c => `<div class="conv-item ${telActivoConsignacion===c.telefono?'active':''}" onclick="abrirChatConsignacion('${c.telefono}','${(c.nombre||c.telefono).replace(/'/g,"\\'")}')">
+    <div style="display:flex;justify-content:space-between;align-items:center">
+      <strong style="font-size:13px">${c.nombre||c.telefono}</strong>
+      <span style="background:#f59e0b;color:#fff;font-size:10px;padding:1px 6px;border-radius:10px">CONSIGN.</span>
+    </div>
+    <div style="font-size:11px;color:#999;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${c.ultimo_msg||''}</div>
+  </div>`).join('');
+}
+
+async function abrirChatConsignacion(tel, nombre) {
+  telActivoConsignacion = tel;
+  const hdr = document.getElementById('chat-header-info-consignacion');
+  if (hdr) hdr.innerHTML = `<strong>${nombre}</strong><br><small style="color:#999">${tel} — CONSIGNACION</small>`;
+  const ia = document.getElementById('chat-input-area-consignacion');
+  if (ia) ia.style.display = 'flex';
+  await renderChatConsignacion(tel);
+  renderConversacionesConsignacion(conversacionesConsignacionData);
+}
+
+async function renderChatConsignacion(tel, limit=500) {
+  const d = await api('GET', `/api/bandeja-venta/${tel}?limit=${limit}`);
+  const wrap = document.getElementById('chat-messages-consignacion');
+  if (!wrap || !d?.msgs) return;
+  const scrollPos = wrap.scrollTop;
+  const countAntes = wrap.children.length;
+  wrap.innerHTML = d.msgs.map(m => {
+    const esS = m.direccion === 'saliente';
+    const contenido = m.contenido.includes('CONSIGNACION') || m.contenido.includes('CONSIGNACIÓN')
+      ? m.contenido.replace(/CONSIGNACI[OÓ]N/gi, '<strong style="color:#f59e0b">$&</strong>')
+      : m.contenido;
+    return `<div style="display:flex;justify-content:${esS?'flex-end':'flex-start'};margin-bottom:6px">
+      <div style="max-width:70%;background:${esS?'#dcf8c6':'#fff'};border-radius:10px;padding:8px 12px;font-size:13px;box-shadow:0 1px 2px rgba(0,0,0,0.1)">
+        ${contenido}
+        <div style="font-size:10px;color:#999;margin-top:2px;text-align:right">${new Date(m.created_at).toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit'})}</div>
+      </div>
+    </div>`;
+  }).join('');
+  if (wrap.children.length > countAntes) wrap.scrollTop = wrap.scrollHeight;
+  else wrap.scrollTop = scrollPos;
+}
+
+async function sendManualConsignacion() {
+  if (!telActivoConsignacion) return;
+  const inp = document.getElementById('msg-input-consignacion');
+  const msg = inp?.value?.trim();
+  if (!msg) return;
+  await api('POST', `/api/bandeja-venta/${telActivoConsignacion}/send`, { mensaje: msg });
+  inp.value = '';
+  await renderChatConsignacion(telActivoConsignacion);
+}
+// ── FIN CONSIGNACION ──────────────────────────────────────────────────────────
 
 async function sendManualVenta() {
   if (!telActivoVenta) return;
