@@ -171,7 +171,7 @@ app.post('/webhook/evolution', async (req, res) => {
     if (!respuesta) return;
 
     conversaciones[tel].push({ role: 'assistant', content: respuesta });
-    await evoSendText(tel, respuesta);
+    await evoSendText(tel, respuesta.replace(/\n+/g, ' ').trim());
     db.prepare("INSERT INTO mensajes (telefono, nombre, direccion, contenido, tipo) VALUES (?,?,?,?,?)").run(tel, nombreFinal, 'saliente', respuesta, 'texto');
     console.log(`[BOT] -> ${nombreFinal}: ${respuesta.slice(0,60)}`);
 
@@ -217,7 +217,7 @@ app.post('/webhook/venta', async (req, res) => {
       const respuesta = data.message;
       if (!respuesta) return;
       conversaciones['v_'+tel].push({ role: 'assistant', content: respuesta });
-      await evoSendText2(tel, respuesta);
+      await evoSendText2(tel, respuesta.replace(/\n+/g, ' ').trim());
       db.prepare("INSERT INTO mensajes_venta (telefono, nombre, direccion, contenido, tipo) VALUES (?,?,?,?,?)").run(tel, nombre, 'saliente', respuesta, 'texto');
       console.log(`[VENTA BOT] -> ${nombre}: ${respuesta.slice(0,60)}`);
     } catch(e) { console.error('[VENTA BOT] Error:', e.message); }
