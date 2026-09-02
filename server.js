@@ -72,7 +72,9 @@ async function evoSendText(telefono, texto) {
 
 async function evoSendText2(telefono, texto) {
   const url = `${EVO_URL2}/message/sendText/${EVO_INSTANCE2}`;
-  const body = { number: '54' + telefono, text: texto };
+  // Agregar 9 para celulares argentinos si no lo tiene
+  const numFmt = telefono.startsWith('9') ? '54' + telefono : '549' + telefono;
+  const body = { number: numFmt, text: texto };
   console.log('[EVO2] Enviando a:', url, '| number:', body.number, '| apikey:', EVO_APIKEY2.slice(0,8));
   const r = await fetch(url, {
     method: 'POST',
