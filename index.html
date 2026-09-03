@@ -637,41 +637,41 @@ async function loadResumenVenta() {
   try {
     const d = await api('GET', '/api/bandeja-venta');
     if (!d || !d.length) { lista.innerHTML = '<div style="color:var(--muted);font-size:13px;text-align:center;padding:10px">Sin conversaciones</div>'; return; }
-    let html = '';
+    lista.innerHTML = '';
     for (const conv of d.slice(0, 30)) {
       const msgs = await api('GET', '/api/bandeja-venta/' + conv.telefono);
       const todos = msgs.msgs || [];
-      const autoData = extraerDatosConversacion(todos, 'venta');
-      const partes = [autoData.auto, autoData.anio, autoData.km, autoData.precio].filter(Boolean);
-      const stockTxt = partes.join(' | ');
-      const nombreDisplay = autoData.nombre || conv.nombre || conv.telefono;
-      html += '<div style="background:var(--card);border:1px solid var(--border);border-radius:8px;padding:10px 14px;font-size:12px">';
-      html += '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px">';
-      html += '<strong style="font-size:13px">' + nombreDisplay + '</strong>';
-      html += '<span style="color:var(--muted);font-size:11px">' + conv.telefono + '</span></div>';
-      html += '<div style="color:var(--muted)">';
-      if (autoData.auto) html += '&#128663; <strong>' + autoData.auto + '</strong>';
-      if (autoData.anio) html += ' &middot; ' + autoData.anio;
-      if (autoData.km) html += ' &middot; &#128739; ' + autoData.km;
-      if (autoData.precio) html += ' &middot; &#128176; ' + autoData.precio;
-      html += '</div>';
-      if (stockTxt) {
-        html += '<div style="margin-top:6px">';
-        html += '<button class="btn-copy-stock" style="background:#c8102e;color:#fff;border:none;border-radius:5px;padding:3px 8px;font-size:11px;cursor:pointer">Copiar para Stock</button>';
-        html += '</div>';
+      const ad = extraerDatosConversacion(todos, 'venta');
+      const nombreDisplay = ad.nombre || conv.nombre || conv.telefono;
+      const partes = [ad.auto, ad.anio, ad.km, ad.precio].filter(Boolean);
+      const copyText = partes.join(' | ');
+      const div = document.createElement('div');
+      div.style.cssText = 'background:var(--card);border:1px solid var(--border);border-radius:8px;padding:10px 14px;font-size:12px;margin-bottom:6px';
+      div.innerHTML = '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px">'
+        + '<strong style="font-size:13px">' + nombreDisplay + '</strong>'
+        + '<span style="color:var(--muted);font-size:11px">' + conv.telefono + '</span></div>'
+        + '<div style="color:var(--muted)">'
+        + (ad.auto ? '&#128663; <strong>' + ad.auto + '</strong>' : '')
+        + (ad.anio ? ' &middot; ' + ad.anio : '')
+        + (ad.km ? ' &middot; &#128739; ' + ad.km : '')
+        + (ad.precio ? ' &middot; &#128176; ' + ad.precio : '')
+        + '</div>';
+      if (copyText) {
+        const btnCopy = document.createElement('button');
+        btnCopy.textContent = 'Copiar para Stock';
+        btnCopy.style.cssText = 'background:#c8102e;color:#fff;border:none;border-radius:5px;padding:3px 8px;font-size:11px;cursor:pointer;margin-top:6px';
+        div.appendChild(btnCopy);
+        btnCopy.addEventListener('click', (function(txt) {
+          return function() {
+            navigator.clipboard.writeText(txt).then(function() {
+              btnCopy.textContent = 'Copiado!';
+              setTimeout(function() { btnCopy.textContent = 'Copiar para Stock'; }, 2000);
+            }).catch(function() { alert(txt); });
+          };
+        })(copyText));
       }
-      html += '</div>';
+      lista.appendChild(div);
     }
-    lista.innerHTML = html || '<div style="color:var(--muted);font-size:13px;text-align:center;padding:10px">Sin datos</div>';
-    // Agregar eventos a los botones de copiar
-    lista.querySelectorAll('.btn-copy-stock').forEach(function(btn, i) {
-      btn.addEventListener('click', function() {
-        var items = lista.querySelectorAll('.btn-copy-stock');
-        navigator.clipboard.writeText(btn.closest('div[style]').querySelector('div[style*="muted"]').textContent.trim()).catch(function(){});
-        btn.textContent = 'Copiado!';
-        setTimeout(function(){ btn.textContent = 'Copiar para Stock'; }, 2000);
-      });
-    });
   } catch(e) {
     lista.innerHTML = '<div style="color:#e74c3c;font-size:13px;padding:10px">Error: ' + e.message + '</div>';
   }
