@@ -643,7 +643,8 @@ async function loadResumenVenta() {
       const todos = msgs.msgs || [];
       const ad = extraerDatosConversacion(todos, 'venta');
       const nombreDisplay = ad.nombre || conv.nombre || conv.telefono;
-      const partes = [ad.auto, ad.anio, ad.km, ad.precio].filter(Boolean);
+      const tel = conv.telefono;
+      const partes = [nombreDisplay, tel, ad.auto, ad.anio, ad.km, ad.precio].filter(Boolean);
       const copyText = partes.join(' | ');
       const div = document.createElement('div');
       div.style.cssText = 'background:var(--card);border:1px solid var(--border);border-radius:8px;padding:10px 14px;font-size:12px;margin-bottom:6px';
