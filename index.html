@@ -679,19 +679,28 @@ async function loadResumenVenta() {
 }
 
 function extraerDatosConversacion(msgs, tipo) {
-  // Extraer datos del flujo de preguntas de Tutusita
   var data = { auto: '', anio: '', presupuesto: '', nombre: '', km: '', precio: '' };
-  var userMsgs = msgs.filter(m => m.direccion === 'entrante').map(m => m.contenido);
-  var botMsgs = msgs.filter(m => m.direccion === 'saliente').map(m => m.contenido);
+  // Ordenar todos los mensajes cronologicamente
+  var todos = msgs.slice().sort(function(a,b){ return new Date(a.created_at) - new Date(b.created_at); });
   
-  for (var i = 0; i < botMsgs.length; i++) {
-    var bot = botMsgs[i] || '';
-    var respUser = userMsgs[i + 1] || userMsgs[i] || '';
+  for (var i = 0; i < todos.length; i++) {
+    var m = todos[i];
+    if (m.direccion !== 'saliente') continue; // es del bot
+    var bot = m.contenido || '';
+    // La respuesta del usuario es el siguiente mensaje entrante
+    var respUser = '';
+    for (var j = i+1; j < todos.length; j++) {
+      if (todos[j].direccion === 'entrante') { respUser = todos[j].contenido || ''; break; }
+    }
+    if (!respUser) continue;
     
     if (bot.includes('marca y modelo') || bot.includes('Cuál es la marca')) {
-      data.auto = respUser.slice(0, 50);
+      data.auto = respUser.slice(0, 80);
     }
-    if (bot.includes('De qué año') || bot.includes('qué año')) {
+    if (bot.includes('versión') || bot.includes('version') || bot.includes('equipamiento')) {
+      if (data.auto && !data.auto.includes(respUser.slice(0,10))) data.auto = (data.auto + ' ' + respUser).slice(0, 80);
+    }
+    if (bot.includes('De qué año') || bot.includes('qué año') || bot.includes('año es')) {
       data.anio = respUser.slice(0, 10);
     }
     if (bot.includes('dinero') || bot.includes('presupuesto') || bot.includes('Cuánto dinero')) {
