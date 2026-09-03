@@ -722,8 +722,10 @@ function extraerDatosConversacion(msgs, tipo) {
       data.garantes = respUser.slice(0, 60);
     }
   }
-  for (var k = 0; k < userMsgs.length; k++) {
-    var tlm = userMsgs[k].match(/3[0-9]{9}/);
+  // Buscar telefono en mensajes entrantes
+  var _entrantes = todos.filter(function(m){ return m.direccion === 'entrante'; }).map(function(m){ return m.contenido || ''; });
+  for (var k = 0; k < _entrantes.length; k++) {
+    var tlm = _entrantes[k].match(/3[0-9]{9}/);
     if (tlm && !data.telefono) { data.telefono = tlm[0]; }
   }
   return data;
