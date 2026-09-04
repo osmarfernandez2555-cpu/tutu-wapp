@@ -22,6 +22,33 @@ const TUTU_VENTA_URL = process.env.TUTU_VENTA_URL || 'https://tutu-ventas-produc
 const conversaciones  = {};
 const cooldowns       = {}; // evita procesar multiples imagenes seguidas
 const COOLDOWN_MS     = 10000; // 10 segundos entre respuestas por numero
+const ultimoMensaje   = {}; // timestamp del ultimo mensaje de cada usuario
+const recontactoTimer = {}; // timers de recontacto
+const RECONTACTO_MS   = 3 * 60 * 60 * 1000;  // 3 horas
+const RETOMA_MS       = 12 * 60 * 60 * 1000; // 12 horas para retomar
+const MSG_RECONTACTO  = '¡Hola! 👋 ¿Seguís ahí? Estoy acá para ayudarte, avisame y seguimos la charla 😊';
+
+function programarRecontacto(tel, tipo) {
+  // Cancelar timer previo si existe
+  if (recontactoTimer[tel]) { clearTimeout(recontactoTimer[tel]); delete recontactoTimer[tel]; }
+  // Programar nuevo recontacto en 3 horas
+  recontactoTimer[tel] = setTimeout(async () => {
+    // Solo enviar si no hubo mensajes nuevos
+    const ahora = Date.now();
+    if (ultimoMensaje[tel] && ahora - ultimoMensaje[tel] < RECONTACTO_MS) return;
+    try {
+      if (tipo === 'venta') {
+        await evoSendText2(tel, MSG_RECONTACTO);
+        db.prepare("INSERT INTO mensajes_venta (telefono, nombre, direccion, contenido, tipo) VALUES (?,?,?,?,?)").run(tel, tel, 'saliente', MSG_RECONTACTO, 'texto');
+      } else {
+        await evoSendText(tel, MSG_RECONTACTO);
+        db.prepare("INSERT INTO mensajes (telefono, nombre, direccion, contenido, tipo) VALUES (?,?,?,?,?)").run(tel, tel, 'saliente', MSG_RECONTACTO, 'texto');
+      }
+      console.log(`[RECONTACTO] -> ${tel} (${tipo})`);
+      delete recontactoTimer[tel];
+    } catch(e) { console.error('[RECONTACTO] Error:', e.message); }
+  }, RECONTACTO_MS);
+}
 
 const app         = express();
 const PORT        = process.env.PORT || 3000;
@@ -152,6 +179,18 @@ app.post('/webhook/evolution', async (req, res) => {
     db.prepare("INSERT INTO mensajes (telefono, nombre, direccion, contenido, tipo) VALUES (?,?,?,?,?)").run(tel, nombreFinal, 'entrante', contenido || '[foto]', tipo);
     console.log(`[MSG] <- ${nombreFinal} (${tel}): ${(contenido||'[foto]').slice(0,50)}`);
 
+    // Actualizar timestamp y cancelar recontacto
+    ultimoMensaje[tel] = Date.now();
+    programarRecontacto(tel, 'compra');
+
+    // Si el cliente no escribió en más de 12 horas, limpiar historial (nueva conversación)
+    const tiempoUltimo = ultimoMensaje[tel + '_prev'] || 0;
+    if (Date.now() - tiempoUltimo > RETOMA_MS && conversaciones[tel] && conversaciones[tel].length > 0) {
+      console.log(`[RETOMA] ${tel} - más de 12hs, nueva conversación`);
+      delete conversaciones[tel];
+    }
+    ultimoMensaje[tel + '_prev'] = Date.now();
+
     // Si es imagen, enviar mensaje especial al bot para que continúe el flujo
     const mensajeParaBot = tipo !== 'texto' ? '[El cliente envió una foto]' : contenido;
 
@@ -202,6 +241,10 @@ app.post('/webhook/venta', async (req, res) => {
     const mensajeParaBot = esImagen ? '[El cliente envió una foto]' : contenido;
     db.prepare("INSERT INTO mensajes_venta (telefono, nombre, direccion, contenido, tipo) VALUES (?,?,?,?,?)").run(tel, nombre, 'entrante', contenido || '[foto]', esImagen ? 'imagen' : 'texto');
     console.log(`[VENTA] <- ${nombre} (${tel}): ${mensajeParaBot.slice(0,50)}`);
+
+    // Actualizar timestamp y programar recontacto
+    ultimoMensaje['v_'+tel] = Date.now();
+    programarRecontacto(tel, 'venta');
     // Historial de conversacion de venta por numero
     if (!conversaciones['v_'+tel]) conversaciones['v_'+tel] = [];
     conversaciones['v_'+tel].push({ role: 'user', content: mensajeParaBot });
