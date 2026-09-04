@@ -680,56 +680,74 @@ async function loadResumenVenta() {
 
 function extraerDatosConversacion(msgs, tipo) {
   var data = { auto: '', anio: '', presupuesto: '', nombre: '', km: '', precio: '' };
-  // Ordenar todos los mensajes cronologicamente
   var todos = msgs.slice().sort(function(a,b){ return new Date(a.created_at) - new Date(b.created_at); });
-  
+
+  // Rastrear qué respuesta del usuario ya fue "consumida" por una pregunta anterior
+  // para evitar que "Tengo una Alaskan" (respuesta a dinero) se tome como auto
+  var respuestasUsadas = {};
+
   for (var i = 0; i < todos.length; i++) {
     var m = todos[i];
-    if (m.direccion !== 'saliente') continue; // es del bot
+    if (m.direccion !== 'saliente') continue;
     var bot = m.contenido || '';
-    // La respuesta del usuario es el siguiente mensaje entrante
+    // Buscar el siguiente mensaje entrante que no fue usado aun
     var respUser = '';
+    var respIdx = -1;
     for (var j = i+1; j < todos.length; j++) {
-      if (todos[j].direccion === 'entrante') { respUser = todos[j].contenido || ''; break; }
+      if (todos[j].direccion === 'entrante' && !respuestasUsadas[j]) {
+        respUser = todos[j].contenido || '';
+        respIdx = j;
+        break;
+      }
     }
-    if (!respUser) continue;
-    
+    if (!respUser || respIdx < 0) continue;
+
     if (bot.includes('marca y modelo') || bot.includes('Cuál es la marca')) {
       data.auto = respUser.slice(0, 80);
+      respuestasUsadas[respIdx] = true;
     }
     if (bot.includes('versión') || bot.includes('version') || bot.includes('equipamiento')) {
       if (data.auto && !data.auto.includes(respUser.slice(0,10))) data.auto = (data.auto + ' ' + respUser).slice(0, 80);
+      respuestasUsadas[respIdx] = true;
     }
-    if (bot.includes('De qué año') || bot.includes('qué año') || bot.includes('año es')) {
+    if (bot.includes('De qué año') || bot.includes('qué año') || bot.includes('año es') || bot.includes('año lo estás')) {
       data.anio = respUser.slice(0, 10);
+      respuestasUsadas[respIdx] = true;
     }
-    if (bot.includes('dinero') || bot.includes('presupuesto') || bot.includes('Cuánto dinero')) {
+    if (bot.includes('dinero') || bot.includes('presupuesto') || bot.includes('Cuánto dinero') || bot.includes('disponible para')) {
       data.presupuesto = respUser.slice(0, 30);
+      respuestasUsadas[respIdx] = true;
     }
-    if (bot.includes('nombre') || bot.includes('Me decís tu nombre')) {
+    if (bot.includes('nombre') || bot.includes('Me decís tu nombre') || bot.includes('tu nombre')) {
       data.nombre = respUser.slice(0, 40);
+      respuestasUsadas[respIdx] = true;
     }
-    if (bot.includes('kilómetros') || bot.includes('kilometros') || bot.includes('Cuántos km')) {
+    if (bot.includes('kilómetros') || bot.includes('kilometros') || bot.includes('Cuántos km') || bot.includes('km tiene')) {
       data.km = respUser.slice(0, 20);
+      respuestasUsadas[respIdx] = true;
     }
-    if (bot.includes('pretendido') || bot.includes('precio') || bot.includes('esperás recibir')) {
+    if (bot.includes('pretendido') || bot.includes('esperás recibir') || bot.includes('querés recibir')) {
       data.precio = respUser.slice(0, 30);
+      respuestasUsadas[respIdx] = true;
     }
     if (bot.includes('DNI') && !bot.includes('garante')) {
       data.dni = respUser.slice(0, 20);
+      respuestasUsadas[respIdx] = true;
     }
     if (bot.includes('garante')) {
       data.garantes = respUser.slice(0, 60);
+      respuestasUsadas[respIdx] = true;
     }
   }
   // Buscar telefono en mensajes entrantes
   var _entrantes = todos.filter(function(m){ return m.direccion === 'entrante'; }).map(function(m){ return m.contenido || ''; });
   for (var k = 0; k < _entrantes.length; k++) {
-    var tlm = _entrantes[k].match(/3[0-9]{9}/);
+    var tlm = _entrantes[k].match(/\b3[0-9]{9}\b/);
     if (tlm && !data.telefono) { data.telefono = tlm[0]; }
   }
   return data;
 }
+
 // ── FIN RESUMENES BOT ─────────────────────────────────────────────────────────
 
 async function loadStats() {
