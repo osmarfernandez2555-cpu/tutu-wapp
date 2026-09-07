@@ -326,11 +326,11 @@
       <div id="panel-bandeja" class="panel">
         <div style="display:grid;grid-template-columns:280px 1fr;gap:0;height:calc(100vh - 120px);border:1px solid var(--border);border-radius:var(--radius);overflow:hidden;background:var(--card);min-height:0">
           <!-- Lista conversaciones -->
-          <div style="border-right:1px solid var(--border);display:flex;flex-direction:column">
-            <div style="padding:12px;border-bottom:1px solid var(--border)">
+          <div style="border-right:1px solid var(--border);display:flex;flex-direction:column;overflow:hidden;min-height:0">
+            <div style="padding:12px;border-bottom:1px solid var(--border);flex-shrink:0">
               <input id="bandeja-search" placeholder="Buscar conversación..." style="width:100%;font-size:12px" oninput="filterConversaciones()">
             </div>
-            <div id="conversaciones-list" style="flex:1;overflow-y:auto"></div>
+            <div id="conversaciones-list" style="flex:1;overflow-y:scroll;min-height:0"></div>
           </div>
           <!-- Ventana de chat -->
           <div style="display:flex;flex-direction:column;min-height:0;overflow:hidden;flex:1">
@@ -357,11 +357,11 @@
 id="panel-bandeja-venta" class="panel">
         <div style="display:grid;grid-template-columns:280px 1fr;gap:0;height:calc(100vh - 120px);border:1px solid var(--border);border-radius:var(--radius);overflow:hidden;background:var(--card);min-height:0">
           <!-- Lista conversaciones -->
-          <div style="border-right:1px solid var(--border);display:flex;flex-direction:column">
-            <div style="padding:12px;border-bottom:1px solid var(--border)">
+          <div style="border-right:1px solid var(--border);display:flex;flex-direction:column;overflow:hidden;min-height:0">
+            <div style="padding:12px;border-bottom:1px solid var(--border);flex-shrink:0">
               <input id="bandeja-search" placeholder="Buscar conversación..." style="width:100%;font-size:12px" oninput="filterConversaciones()">
             </div>
-            <div id="conversaciones-list-venta" style="flex:1;overflow-y:auto"></div>
+            <div id="conversaciones-list-venta" style="flex:1;overflow-y:scroll;min-height:0"></div>
           </div>
           <!-- Ventana de chat -->
           <div style="display:flex;flex-direction:column;min-height:0;overflow:hidden;flex:1">
@@ -389,11 +389,11 @@ id="panel-bandeja-venta" class="panel">
 id="panel-consignacion" class="panel">
         <div style="display:grid;grid-template-columns:280px 1fr;gap:0;height:calc(100vh - 120px);border:1px solid var(--border);border-radius:var(--radius);overflow:hidden;background:var(--card);min-height:0">
           <!-- Lista conversaciones -->
-          <div style="border-right:1px solid var(--border);display:flex;flex-direction:column">
-            <div style="padding:12px;border-bottom:1px solid var(--border)">
+          <div style="border-right:1px solid var(--border);display:flex;flex-direction:column;overflow:hidden;min-height:0">
+            <div style="padding:12px;border-bottom:1px solid var(--border);flex-shrink:0">
               <input id="bandeja-search" placeholder="Buscar conversación..." style="width:100%;font-size:12px" oninput="filterConversaciones()">
             </div>
-            <div id="conversaciones-list-consignacion" style="flex:1;overflow-y:auto"></div>
+            <div id="conversaciones-list-consignacion" style="flex:1;overflow-y:scroll;min-height:0"></div>
           </div>
           <!-- Ventana de chat -->
           <div style="display:flex;flex-direction:column;min-height:0;overflow:hidden;flex:1">
