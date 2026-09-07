@@ -215,6 +215,16 @@ app.post('/webhook/evolution', async (req, res) => {
     await evoSendText(tel, respuesta.replace(/\n+/g, ' ').trim());
     db.prepare("INSERT INTO mensajes (telefono, nombre, direccion, contenido, tipo) VALUES (?,?,?,?,?)").run(tel, nombreFinal, 'saliente', respuesta, 'texto');
     console.log(`[BOT] -> ${nombreFinal}: ${respuesta.slice(0,60)}`);
+    // Detectar si la conversacion cerro para NO enviar recontacto
+    const FRASES_CIERRE = ['solo nos contactaremos', 'si encontramos una propuesta', 'gracias por tu tiempo', 'muchas gracias por', 'te vamos a contactar', 'nos pondremos en contacto'];
+    const convCerrada = FRASES_CIERRE.some(f => respuesta.toLowerCase().includes(f));
+    if (convCerrada) {
+      // Cancelar recontacto - conversacion cerrada
+      if (recontactoTimer[tel]) { clearTimeout(recontactoTimer[tel]); delete recontactoTimer[tel]; }
+      console.log(`[BOT] Conversacion cerrada para ${tel} - sin recontacto`);
+    } else {
+      programarRecontacto(tel, 'compra');
+    }
 
   } catch(e) { console.error('[WEBHOOK] Error:', e.message); }
 });
@@ -265,6 +275,15 @@ app.post('/webhook/venta', async (req, res) => {
       await evoSendText2(tel, respuesta.replace(/\n+/g, ' ').trim());
       db.prepare("INSERT INTO mensajes_venta (telefono, nombre, direccion, contenido, tipo) VALUES (?,?,?,?,?)").run(tel, nombre, 'saliente', respuesta, 'texto');
       console.log(`[VENTA BOT] -> ${nombre}: ${respuesta.slice(0,60)}`);
+      // Detectar cierre para NO enviar recontacto
+      const FRASES_CIERRE_V = ['tenemos un comprador', 'te contactamos', 'muchas gracias por la info', 'gracias por', 'escribí consignacion'];
+      const convCerradaV = FRASES_CIERRE_V.some(f => respuesta.toLowerCase().includes(f));
+      if (convCerradaV) {
+        if (recontactoTimer[tel]) { clearTimeout(recontactoTimer[tel]); delete recontactoTimer[tel]; }
+        console.log(`[VENTA BOT] Conversacion cerrada para ${tel} - sin recontacto`);
+      } else {
+        programarRecontacto(tel, 'venta');
+      }
     } catch(e) { console.error('[VENTA BOT] Error:', e.message); }
   } catch(e) { console.error('[VENTA WEBHOOK] Error:', e.message); }
 });
