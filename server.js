@@ -24,6 +24,8 @@ const cooldowns       = {}; // evita procesar multiples imagenes seguidas
 const COOLDOWN_MS     = 10000; // 10 segundos entre respuestas por numero
 const ultimoMensaje   = {}; // timestamp del ultimo mensaje de cada usuario
 const recontactoTimer = {}; // timers de recontacto
+const convCerradas    = {}; // tel -> timestamp de cierre (no responder mas)
+const CIERRE_TTL      = 30 * 24 * 60 * 60 * 1000; // 30 dias
 const RECONTACTO_MS   = 3 * 60 * 60 * 1000;  // 3 horas
 const RETOMA_MS       = 12 * 60 * 60 * 1000; // 12 horas para retomar
 const MSG_RECONTACTO  = '¡Hola! 👋 ¿Seguís ahí? Estoy acá para ayudarte, avisame y seguimos la charla 😊';
@@ -157,6 +159,11 @@ app.post('/webhook/evolution', async (req, res) => {
     const tel = jid.replace('@s.whatsapp.net','').replace('@c.us','').replace(/[^0-9]/g,'').replace(/^54/,'');
     if (!tel || tel.length < 8) return;
 
+    // Si la conversacion fue cerrada hace menos de 30 dias, ignorar
+    if (convCerradas[tel] && Date.now() - convCerradas[tel] < CIERRE_TTL) {
+      console.log(`[BOT] Ignorando mensaje de ${tel} - conversacion cerrada`);
+      return;
+    }
     const esImagen = !!msg.message?.imageMessage;
     const esAudio  = !!msg.message?.audioMessage;
     const contenido = msg.message?.conversation || msg.message?.extendedTextMessage?.text || msg.message?.imageMessage?.caption || '';
@@ -219,9 +226,10 @@ app.post('/webhook/evolution', async (req, res) => {
     const FRASES_CIERRE = ['solo nos contactaremos', 'si encontramos una propuesta', 'gracias por tu tiempo', 'muchas gracias por', 'te vamos a contactar', 'nos pondremos en contacto'];
     const convCerrada = FRASES_CIERRE.some(f => respuesta.toLowerCase().includes(f));
     if (convCerrada) {
-      // Cancelar recontacto - conversacion cerrada
+      // Cancelar recontacto y marcar como cerrada
       if (recontactoTimer[tel]) { clearTimeout(recontactoTimer[tel]); delete recontactoTimer[tel]; }
-      console.log(`[BOT] Conversacion cerrada para ${tel} - sin recontacto`);
+      convCerradas[tel] = Date.now();
+      console.log(`[BOT] Conversacion cerrada para ${tel} - sin recontacto ni respuesta futura`);
     } else {
       programarRecontacto(tel, 'compra');
     }
