@@ -75,6 +75,7 @@ db.exec(`
   CREATE TABLE IF NOT EXISTS email_campanas (id INTEGER PRIMARY KEY AUTOINCREMENT, nombre TEXT NOT NULL, asunto TEXT NOT NULL, cuerpo_html TEXT NOT NULL, from_name TEXT DEFAULT 'Tutu Automotores', reply_to TEXT, delay_segundos INTEGER DEFAULT 5, max_por_dia INTEGER DEFAULT 300, status TEXT DEFAULT 'pendiente', total INTEGER DEFAULT 0, enviados INTEGER DEFAULT 0, fallidos INTEGER DEFAULT 0, created_at DATETIME DEFAULT CURRENT_TIMESTAMP);
   CREATE TABLE IF NOT EXISTS email_campana_contactos (id INTEGER PRIMARY KEY AUTOINCREMENT, campana_id INTEGER, contact_id INTEGER, status TEXT DEFAULT 'pendiente', enviado_at DATETIME, error_msg TEXT);
   CREATE TABLE IF NOT EXISTS email_historial (id INTEGER PRIMARY KEY AUTOINCREMENT, campana_id INTEGER, contact_id INTEGER, email TEXT, nombre TEXT, status TEXT, error_msg TEXT, sent_at DATETIME DEFAULT CURRENT_TIMESTAMP);
+  CREATE TABLE IF NOT EXISTS leads_cargados (id INTEGER PRIMARY KEY AUTOINCREMENT, telefono TEXT NOT NULL, tipo TEXT NOT NULL, nombre TEXT, created_at DATETIME DEFAULT CURRENT_TIMESTAMP, UNIQUE(telefono, tipo));
 `);
 try { db.exec("ALTER TABLE tandas ADD COLUMN imagen_path TEXT"); } catch(e) {}
 try { db.exec("ALTER TABLE tandas ADD COLUMN imagen_caption INTEGER DEFAULT 0"); } catch(e) {}
@@ -441,6 +442,27 @@ app.get('/api/bandeja-venta', auth, (req, res) => { res.json(db.prepare("SELECT 
 app.get('/api/bandeja-venta/:telefono', auth, (req, res) => { const tel = req.params.telefono.replace(/\D/g,''); const limit = Math.min(parseInt(req.query.limit)||500,1000); db.prepare("UPDATE mensajes_venta SET leido = 1 WHERE telefono = ? AND direccion = 'entrante'").run(tel); res.json({ msgs: db.prepare("SELECT * FROM mensajes_venta WHERE telefono = ? ORDER BY id ASC LIMIT ?").all(tel, limit), contacto: db.prepare("SELECT * FROM contacts WHERE telefono = ?").get(tel) }); });
 app.post('/api/bandeja-venta/:telefono/send', auth, async (req, res) => { const tel = req.params.telefono.replace(/\D/g,''); const { mensaje } = req.body; if (!mensaje) return res.status(400).json({ error: 'Mensaje vacio' }); try { await evoSendText2(tel, mensaje); const contacto = db.prepare("SELECT nombre FROM contacts WHERE telefono = ?").get(tel); db.prepare("INSERT INTO mensajes_venta (telefono, nombre, direccion, contenido, tipo) VALUES (?,?,?,?,?)").run(tel, contacto?.nombre||tel, 'saliente', mensaje, 'texto'); res.json({ ok: true }); } catch(e) { res.status(400).json({ error: e.message }); } });
 app.get('/api/bandeja-venta/noleidos/count', auth, (req, res) => { res.json({ count: db.prepare("SELECT COUNT(*) as c FROM mensajes_venta WHERE leido = 0 AND direccion = 'entrante'").get().c }); });
+
+// ── Leads marcados como "Ya cargado" (compra/venta) ───────────────────────────
+app.get('/api/leads-cargados', auth, (req, res) => {
+  const { tipo } = req.query;
+  if (!tipo) return res.status(400).json({ error: 'Falta tipo' });
+  res.json(db.prepare('SELECT telefono, nombre, created_at FROM leads_cargados WHERE tipo = ? ORDER BY created_at DESC').all(tipo));
+});
+app.post('/api/leads-cargados', auth, (req, res) => {
+  const { telefono, tipo, nombre } = req.body;
+  if (!telefono || !tipo) return res.status(400).json({ error: 'Faltan datos' });
+  const tel = telefono.replace(/\D/g, '');
+  try {
+    db.prepare('INSERT OR IGNORE INTO leads_cargados (telefono, tipo, nombre) VALUES (?,?,?)').run(tel, tipo, nombre || '');
+    res.json({ ok: true });
+  } catch(e) { res.status(400).json({ error: e.message }); }
+});
+app.delete('/api/leads-cargados/:tipo/:telefono', auth, (req, res) => {
+  const tel = req.params.telefono.replace(/\D/g, '');
+  db.prepare('DELETE FROM leads_cargados WHERE tipo = ? AND telefono = ?').run(req.params.tipo, tel);
+  res.json({ ok: true });
+});
 
 app.get('/health', (_, res) => res.json({ status: 'ok', evo: EVO_URL, instance: EVO_INSTANCE }));
 
