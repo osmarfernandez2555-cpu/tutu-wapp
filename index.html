@@ -165,8 +165,14 @@
           Resumen Compra — Clientes que buscan auto
           <button onclick="loadResumenCompra()" style="margin-left:10px;background:#1a6dd4;color:#fff;border:none;border-radius:6px;padding:3px 10px;font-size:11px;cursor:pointer">Actualizar</button>
         </div>
-        <div id="resumen-compra-lista" style="display:flex;flex-direction:column;gap:6px;max-height:300px;overflow-y:auto;margin-bottom:12px">
+        <div id="resumen-compra-lista" style="display:flex;flex-direction:column;gap:6px;max-height:300px;overflow-y:auto;margin-bottom:8px">
           <div style="color:var(--muted);font-size:13px;text-align:center;padding:10px">Click en Actualizar</div>
+        </div>
+        <div style="margin-bottom:12px">
+          <div onclick="toggleCargados('compra')" style="cursor:pointer;font-size:11px;font-weight:600;color:var(--muted);display:flex;align-items:center;gap:4px">
+            <span id="chev-cargados-compra">▸</span> Cargados <span id="count-cargados-compra" style="background:#16a34a;color:#fff;border-radius:10px;padding:0 6px;font-size:10px"></span>
+          </div>
+          <div id="resumen-compra-cargados" style="display:none;flex-direction:column;gap:6px;max-height:220px;overflow-y:auto;margin-top:6px"></div>
         </div>
 
         <!-- RESUMEN VENTA -->
@@ -174,8 +180,14 @@
           Resumen Venta — Autos que quieren vender
           <button onclick="loadResumenVenta()" style="margin-left:10px;background:#c8102e;color:#fff;border:none;border-radius:6px;padding:3px 10px;font-size:11px;cursor:pointer">Actualizar</button>
         </div>
-        <div id="resumen-venta-lista" style="display:flex;flex-direction:column;gap:6px;max-height:300px;overflow-y:auto;margin-bottom:12px">
+        <div id="resumen-venta-lista" style="display:flex;flex-direction:column;gap:6px;max-height:300px;overflow-y:auto;margin-bottom:8px">
           <div style="color:var(--muted);font-size:13px;text-align:center;padding:10px">Click en Actualizar</div>
+        </div>
+        <div style="margin-bottom:12px">
+          <div onclick="toggleCargados('venta')" style="cursor:pointer;font-size:11px;font-weight:600;color:var(--muted);display:flex;align-items:center;gap:4px">
+            <span id="chev-cargados-venta">▸</span> Cargados <span id="count-cargados-venta" style="background:#16a34a;color:#fff;border-radius:10px;padding:0 6px;font-size:10px"></span>
+          </div>
+          <div id="resumen-venta-cargados" style="display:none;flex-direction:column;gap:6px;max-height:220px;overflow-y:auto;margin-top:6px"></div>
         </div>
 
         <div class="card">
@@ -592,9 +604,14 @@ async function loadResumenCompra() {
   lista.innerHTML = '<div style="color:var(--muted);font-size:13px;text-align:center;padding:10px">Cargando...</div>';
   try {
     const d = await api('GET', '/api/bandeja');
+    const cargados = await api('GET', '/api/leads-cargados?tipo=compra');
+    const telsCargados = new Set((cargados||[]).map(c => c.telefono));
+    renderCargados('compra', cargados||[]);
     if (!d || !d.length) { lista.innerHTML = '<div style="color:var(--muted);font-size:13px;text-align:center;padding:10px">Sin conversaciones</div>'; return; }
+    const pendientes = d.filter(conv => !telsCargados.has(conv.telefono.replace(/\D/g,'')));
+    if (!pendientes.length) { lista.innerHTML = '<div style="color:var(--muted);font-size:13px;text-align:center;padding:10px">Todo cargado ✅</div>'; return; }
     lista.innerHTML = '';
-    for (const conv of d.slice(0, 30)) {
+    for (const conv of pendientes.slice(0, 30)) {
       const msgs = await api('GET', '/api/bandeja/' + conv.telefono);
       const todos = msgs.msgs || [];
       const ad = extraerDatosConversacion(todos, 'compra');
@@ -614,8 +631,9 @@ async function loadResumenCompra() {
         + (ad.presupuesto ? ' &middot; &#128176; ' + ad.presupuesto : '')
         + '</div>'
         + (ad.dni ? '<div style="color:var(--muted);font-size:11px;margin-top:2px">&#128196; DNI: ' + ad.dni + (ad.garantes ? '  &#128101; ' + ad.garantes : '') + '</div>' : '')
-        + '<div style="margin-top:6px"><button style="background:#1a6dd4;color:#fff;border:none;border-radius:5px;padding:3px 8px;font-size:11px;cursor:pointer">Copiar para Match</button></div>';
-      const btn = div.querySelector('button');
+        + '<div style="margin-top:6px;display:flex;gap:6px"><button class="btn-copiar">Copiar para Match</button><button class="btn-cargado">✅ Ya cargado</button></div>';
+      const btn = div.querySelector('.btn-copiar');
+      btn.style.cssText = 'background:#1a6dd4;color:#fff;border:none;border-radius:5px;padding:3px 8px;font-size:11px;cursor:pointer';
       btn.addEventListener('click', (function(txt) {
         return function() {
           navigator.clipboard.writeText(txt).then(function() {
@@ -624,6 +642,13 @@ async function loadResumenCompra() {
           }).catch(function(){ alert(txt); });
         };
       })(copyText));
+      const btnCargado = div.querySelector('.btn-cargado');
+      btnCargado.style.cssText = 'background:#16a34a;color:#fff;border:none;border-radius:5px;padding:3px 8px;font-size:11px;cursor:pointer';
+      btnCargado.addEventListener('click', (function(telefono, nombre, cardDiv) {
+        return function() {
+          marcarCargado('compra', telefono, nombre, cardDiv);
+        };
+      })(tel, nombreDisplay, div));
       lista.appendChild(div);
     }
   } catch(e) {
@@ -631,14 +656,60 @@ async function loadResumenCompra() {
   }
 }
 
+async function marcarCargado(tipo, telefono, nombre, cardDiv) {
+  try {
+    await api('POST', '/api/leads-cargados', { telefono, tipo, nombre });
+    if (cardDiv) cardDiv.remove();
+    const cargados = await api('GET', '/api/leads-cargados?tipo=' + tipo);
+    renderCargados(tipo, cargados || []);
+  } catch(e) { alert('Error: ' + e.message); }
+}
+
+async function deshacerCargado(tipo, telefono) {
+  try {
+    await api('DELETE', '/api/leads-cargados/' + tipo + '/' + telefono);
+    if (tipo === 'compra') loadResumenCompra(); else loadResumenVenta();
+  } catch(e) { alert('Error: ' + e.message); }
+}
+
+function toggleCargados(tipo) {
+  const box = document.getElementById('resumen-' + tipo + '-cargados');
+  const chev = document.getElementById('chev-cargados-' + tipo);
+  const abierto = box.style.display === 'flex';
+  box.style.display = abierto ? 'none' : 'flex';
+  chev.textContent = abierto ? '▸' : '▾';
+}
+
+function renderCargados(tipo, cargados) {
+  const box = document.getElementById('resumen-' + tipo + '-cargados');
+  const count = document.getElementById('count-cargados-' + tipo);
+  count.textContent = cargados.length || '';
+  count.style.display = cargados.length ? 'inline-block' : 'none';
+  if (!cargados.length) { box.innerHTML = '<div style="color:var(--muted);font-size:12px;padding:6px">Nada cargado todavía</div>'; return; }
+  box.innerHTML = '';
+  cargados.forEach(function(c) {
+    const div = document.createElement('div');
+    div.style.cssText = 'background:var(--card);border:1px solid var(--border);border-radius:8px;padding:6px 12px;font-size:11px;display:flex;justify-content:space-between;align-items:center;opacity:0.75';
+    div.innerHTML = '<span>' + (c.nombre || c.telefono) + ' <span style="color:var(--muted)">' + c.telefono + '</span></span>'
+      + '<button style="background:transparent;color:#e74c3c;border:1px solid #e74c3c;border-radius:5px;padding:2px 6px;font-size:10px;cursor:pointer">Deshacer</button>';
+    div.querySelector('button').addEventListener('click', function() { deshacerCargado(tipo, c.telefono); });
+    box.appendChild(div);
+  });
+}
+
 async function loadResumenVenta() {
   const lista = document.getElementById('resumen-venta-lista');
   lista.innerHTML = '<div style="color:var(--muted);font-size:13px;text-align:center;padding:10px">Cargando...</div>';
   try {
     const d = await api('GET', '/api/bandeja-venta');
+    const cargados = await api('GET', '/api/leads-cargados?tipo=venta');
+    const telsCargados = new Set((cargados||[]).map(c => c.telefono));
+    renderCargados('venta', cargados||[]);
     if (!d || !d.length) { lista.innerHTML = '<div style="color:var(--muted);font-size:13px;text-align:center;padding:10px">Sin conversaciones</div>'; return; }
+    const pendientes = d.filter(conv => !telsCargados.has(conv.telefono.replace(/\D/g,'')));
+    if (!pendientes.length) { lista.innerHTML = '<div style="color:var(--muted);font-size:13px;text-align:center;padding:10px">Todo cargado ✅</div>'; return; }
     lista.innerHTML = '';
-    for (const conv of d.slice(0, 30)) {
+    for (const conv of pendientes.slice(0, 30)) {
       const msgs = await api('GET', '/api/bandeja-venta/' + conv.telefono);
       const todos = msgs.msgs || [];
       const ad = extraerDatosConversacion(todos, 'venta');
@@ -657,11 +728,13 @@ async function loadResumenVenta() {
         + (ad.km ? ' &middot; &#128739; ' + ad.km : '')
         + (ad.precio ? ' &middot; &#128176; ' + ad.precio : '')
         + '</div>';
+      const btnRow = document.createElement('div');
+      btnRow.style.cssText = 'margin-top:6px;display:flex;gap:6px';
       if (copyText) {
         const btnCopy = document.createElement('button');
         btnCopy.textContent = 'Copiar para Stock';
-        btnCopy.style.cssText = 'background:#c8102e;color:#fff;border:none;border-radius:5px;padding:3px 8px;font-size:11px;cursor:pointer;margin-top:6px';
-        div.appendChild(btnCopy);
+        btnCopy.style.cssText = 'background:#c8102e;color:#fff;border:none;border-radius:5px;padding:3px 8px;font-size:11px;cursor:pointer';
+        btnRow.appendChild(btnCopy);
         btnCopy.addEventListener('click', (function(txt) {
           return function() {
             navigator.clipboard.writeText(txt).then(function() {
@@ -671,6 +744,16 @@ async function loadResumenVenta() {
           };
         })(copyText));
       }
+      const btnCargado = document.createElement('button');
+      btnCargado.textContent = '✅ Ya cargado';
+      btnCargado.style.cssText = 'background:#16a34a;color:#fff;border:none;border-radius:5px;padding:3px 8px;font-size:11px;cursor:pointer';
+      btnRow.appendChild(btnCargado);
+      btnCargado.addEventListener('click', (function(telefono, nombre, cardDiv) {
+        return function() {
+          marcarCargado('venta', telefono, nombre, cardDiv);
+        };
+      })(tel, nombreDisplay, div));
+      div.appendChild(btnRow);
       lista.appendChild(div);
     }
   } catch(e) {
