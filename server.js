@@ -285,7 +285,7 @@ app.post('/webhook/venta', async (req, res) => {
       db.prepare("INSERT INTO mensajes_venta (telefono, nombre, direccion, contenido, tipo) VALUES (?,?,?,?,?)").run(tel, nombre, 'saliente', respuesta, 'texto');
       console.log(`[VENTA BOT] -> ${nombre}: ${respuesta.slice(0,60)}`);
       // Detectar cierre para NO enviar recontacto
-      const FRASES_CIERRE_V = ['tenemos un comprador', 'te contactamos', 'muchas gracias por la info', 'gracias por', 'escribí consignacion'];
+      const FRASES_CIERRE_V = ['si tenemos un comprador', 'muchas gracias por la info', 'gracias por la info', 'consignacion', 'consignación', 'te contactamos'];
       const convCerradaV = FRASES_CIERRE_V.some(f => respuesta.toLowerCase().includes(f));
       if (convCerradaV) {
         if (recontactoTimer[tel]) { clearTimeout(recontactoTimer[tel]); delete recontactoTimer[tel]; }
