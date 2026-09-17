@@ -1566,14 +1566,18 @@ let telActivoConsignacion = null;
 let conversacionesConsignacionData = [];
 
 async function loadConsignacion() {
-  // Filtrar conversaciones de venta que contienen CONSIGNACION
+  // Filtrar conversaciones de venta que mencionen consignación, en cualquier
+  // variante (consigna, consignar, consignado, con o sin tilde)
+  function normalizar(s) {
+    return (s || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toUpperCase();
+  }
   const rows = await api('GET', '/api/bandeja-venta');
   conversacionesConsignacionData = [];
   for (const conv of (rows || [])) {
     const msgs = await api('GET', `/api/bandeja-venta/${conv.telefono}`);
     const todosMsgs = msgs.msgs || [];
     const tieneConsign = todosMsgs.some(m =>
-      m.contenido && m.contenido.toUpperCase().includes('CONSIGNACION')
+      m.contenido && normalizar(m.contenido).includes('CONSIGN')
     );
     if (tieneConsign) conversacionesConsignacionData.push(conv);
   }
