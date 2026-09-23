@@ -76,9 +76,70 @@ db.exec(`
   CREATE TABLE IF NOT EXISTS email_campana_contactos (id INTEGER PRIMARY KEY AUTOINCREMENT, campana_id INTEGER, contact_id INTEGER, status TEXT DEFAULT 'pendiente', enviado_at DATETIME, error_msg TEXT);
   CREATE TABLE IF NOT EXISTS email_historial (id INTEGER PRIMARY KEY AUTOINCREMENT, campana_id INTEGER, contact_id INTEGER, email TEXT, nombre TEXT, status TEXT, error_msg TEXT, sent_at DATETIME DEFAULT CURRENT_TIMESTAMP);
   CREATE TABLE IF NOT EXISTS leads_cargados (id INTEGER PRIMARY KEY AUTOINCREMENT, telefono TEXT NOT NULL, tipo TEXT NOT NULL, nombre TEXT, created_at DATETIME DEFAULT CURRENT_TIMESTAMP, UNIQUE(telefono, tipo));
+  CREATE TABLE IF NOT EXISTS conversaciones_cerradas (telefono TEXT NOT NULL, tipo TEXT NOT NULL, cerrada_at INTEGER NOT NULL, PRIMARY KEY (telefono, tipo));
 `);
 try { db.exec("ALTER TABLE tandas ADD COLUMN imagen_path TEXT"); } catch(e) {}
 try { db.exec("ALTER TABLE tandas ADD COLUMN imagen_caption INTEGER DEFAULT 0"); } catch(e) {}
+
+// ── Cierre de conversación persistente (antes vivía solo en memoria y se
+// perdía en cada reinicio de Railway; además el flujo de VENTA nunca lo
+// revisaba al recibir un mensaje nuevo, por eso seguía respondiendo aunque
+// ya hubiera terminado el flujo) ─────────────────────────────────────────────
+function estaCerradaDB(tel, tipo) {
+  const row = db.prepare('SELECT cerrada_at FROM conversaciones_cerradas WHERE telefono = ? AND tipo = ?').get(tel, tipo);
+  return !!(row && Date.now() - row.cerrada_at < CIERRE_TTL);
+}
+function marcarCerradaDB(tel, tipo) {
+  db.prepare(`
+    INSERT INTO conversaciones_cerradas (telefono, tipo, cerrada_at) VALUES (?,?,?)
+    ON CONFLICT(telefono, tipo) DO UPDATE SET cerrada_at = excluded.cerrada_at
+  `).run(tel, tipo, Date.now());
+}
+
+// ── Anti-duplicados: Evolution a veces manda el mismo mensaje más de una vez
+const mensajesProcesados = new Set();
+function esMensajeDuplicado(msgId) {
+  if (!msgId) return false;
+  if (mensajesProcesados.has(msgId)) return true;
+  mensajesProcesados.add(msgId);
+  if (mensajesProcesados.size > 1000) {
+    const primero = mensajesProcesados.values().next().value;
+    mensajesProcesados.delete(primero);
+  }
+  return false;
+}
+
+// ── Envío automático al stock de Ruthina cuando cierra una conversación de venta
+const RUTHINA_URL = process.env.RUTHINA_URL || 'https://compara-conejo-production.up.railway.app';
+async function enviarAStock(ld, tel, nombreWA) {
+  try {
+    if (!ld) return;
+    const modelo = (ld.modelo || ld.vehiculo || '').trim();
+    if (!modelo) { console.log('[STOCK] No se envía: sin modelo/vehiculo identificado para', tel); return; }
+    const marca = (ld.marca || '').trim();
+    const body = {
+      marca: marca || 'Sin especificar',
+      modelo,
+      version: ld.version || '',
+      anio: ld.anio || '',
+      km: (ld.km || '').toString().replace(/\D/g, '') || 0,
+      precio: (ld.monto || '').toString().replace(/[^\d]/g, '') || '',
+      moneda: 'ARS',
+      estado: 'A revisar',
+      notas: `Cargado automático desde bot de venta WhatsApp. Precio pedido por el vendedor (${ld.nombre || nombreWA}), sujeto a tasación e inspección de Tutu.`,
+      ubicacion: 'Compra WhatsApp - A tasar',
+      telefono: tel
+    };
+    const r = await fetch(`${RUTHINA_URL}/api/stock`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body)
+    });
+    const data = await r.json();
+    if (data.ok) console.log(`[STOCK] Auto de ${tel} enviado a Ruthina (${data.accion}):`, marca, modelo);
+    else console.error('[STOCK] Error de Ruthina al guardar:', data.error);
+  } catch(e) { console.error('[STOCK] Error enviando a Ruthina:', e.message); }
+}
 
 function auth(req, res, next) {
   const token = req.headers['x-admin-token'] || req.query.token;
@@ -155,13 +216,14 @@ app.post('/webhook/evolution', async (req, res) => {
     const msg = body.data;
     if (!msg || msg.key?.fromMe) return;
     if (msg.key?.remoteJid?.endsWith('@g.us')) return; // ignorar grupos
+    if (esMensajeDuplicado(msg.key?.id)) { console.log('[BOT] Mensaje duplicado ignorado:', msg.key?.id); return; }
 
     const jid = msg.key.remoteJid;
     const tel = jid.replace('@s.whatsapp.net','').replace('@c.us','').replace(/[^0-9]/g,'').replace(/^54/,'');
     if (!tel || tel.length < 8) return;
 
-    // Si la conversacion fue cerrada hace menos de 30 dias, ignorar
-    if (convCerradas[tel] && Date.now() - convCerradas[tel] < CIERRE_TTL) {
+    // Si la conversacion fue cerrada hace menos de 30 dias, ignorar (persistente en disco)
+    if (estaCerradaDB(tel, 'compra')) {
       console.log(`[BOT] Ignorando mensaje de ${tel} - conversacion cerrada`);
       return;
     }
@@ -227,9 +289,9 @@ app.post('/webhook/evolution', async (req, res) => {
     const FRASES_CIERRE = ['solo nos contactaremos', 'si encontramos una propuesta', 'gracias por tu tiempo', 'muchas gracias por', 'te vamos a contactar', 'nos pondremos en contacto'];
     const convCerrada = FRASES_CIERRE.some(f => respuesta.toLowerCase().includes(f));
     if (convCerrada) {
-      // Cancelar recontacto y marcar como cerrada
+      // Cancelar recontacto y marcar como cerrada (persistente)
       if (recontactoTimer[tel]) { clearTimeout(recontactoTimer[tel]); delete recontactoTimer[tel]; }
-      convCerradas[tel] = Date.now();
+      marcarCerradaDB(tel, 'compra');
       console.log(`[BOT] Conversacion cerrada para ${tel} - sin recontacto ni respuesta futura`);
     } else {
       programarRecontacto(tel, 'compra');
@@ -248,11 +310,19 @@ app.post('/webhook/venta', async (req, res) => {
     const msg = body.data;
     if (!msg || msg.key?.fromMe) return;
     if (msg.key?.remoteJid?.endsWith('@g.us')) return;
+    if (esMensajeDuplicado(msg.key?.id)) { console.log('[VENTA] Mensaje duplicado ignorado:', msg.key?.id); return; }
     const esImagen = !!msg.message?.imageMessage;
     const contenido = msg.message?.conversation || msg.message?.extendedTextMessage?.text || msg.message?.imageMessage?.caption || '';
     if (!esImagen && (!contenido || contenido.length > 2000)) return;
     const tel = msg.key.remoteJid.replace('@s.whatsapp.net','').replace('@c.us','').replace(/[^0-9]/g,'').replace(/^54/,'');
     if (!tel || tel.length < 8) return;
+
+    // Si la conversacion de venta ya fue cerrada, ignorar (esto faltaba del todo antes)
+    if (estaCerradaDB(tel, 'venta')) {
+      console.log(`[VENTA] Ignorando mensaje de ${tel} - conversacion cerrada`);
+      return;
+    }
+
     const ahoraV = Date.now();
     if (esImagen && cooldowns['v_'+tel] && ahoraV - cooldowns['v_'+tel] < COOLDOWN_MS) return;
     if (esImagen) cooldowns['v_'+tel] = ahoraV;
@@ -271,25 +341,42 @@ app.post('/webhook/venta', async (req, res) => {
     const mensajesVenta = conversaciones['v_'+tel].map(m => ({ role: m.role, content: m.content.slice(0,500) }));
 
     try {
-      const r = await fetch(`${TUTU_VENTA_URL}/api/chat`, {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ messages: mensajesVenta, sessionId: 'wa_venta_' + tel }),
-        signal: AbortSignal.timeout(30000)
-      });
-      const data = await r.json();
-      if (data.error) throw new Error(data.error);
+      // Reintentar una vez si la API de Anthropic devuelve "saturado" (pico pasajero)
+      async function llamarBotVenta() {
+        const r = await fetch(`${TUTU_VENTA_URL}/api/chat`, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ messages: mensajesVenta, sessionId: 'wa_venta_' + tel }),
+          signal: AbortSignal.timeout(30000)
+        });
+        const d = await r.json();
+        if (d.error && /overloaded/i.test(JSON.stringify(d.error))) {
+          console.log('[VENTA BOT] Anthropic saturado, reintentando en 2s...');
+          await new Promise(res => setTimeout(res, 2000));
+          const r2 = await fetch(`${TUTU_VENTA_URL}/api/chat`, {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ messages: mensajesVenta, sessionId: 'wa_venta_' + tel }),
+            signal: AbortSignal.timeout(30000)
+          });
+          return await r2.json();
+        }
+        return d;
+      }
+      const data = await llamarBotVenta();
+      if (data.error) throw new Error(typeof data.error === 'string' ? data.error : JSON.stringify(data.error));
       const respuesta = data.message;
       if (!respuesta) return;
       conversaciones['v_'+tel].push({ role: 'assistant', content: respuesta });
       await evoSendText2(tel, respuesta.replace(/\n+/g, ' ').trim());
       db.prepare("INSERT INTO mensajes_venta (telefono, nombre, direccion, contenido, tipo) VALUES (?,?,?,?,?)").run(tel, nombre, 'saliente', respuesta, 'texto');
       console.log(`[VENTA BOT] -> ${nombre}: ${respuesta.slice(0,60)}`);
-      // Detectar cierre para NO enviar recontacto
+      // Detectar cierre para NO enviar recontacto, y mandar el auto a Ruthina
       const FRASES_CIERRE_V = ['si tenemos un comprador', 'muchas gracias por la info', 'gracias por la info', 'consignacion', 'consignación', 'te contactamos'];
       const convCerradaV = FRASES_CIERRE_V.some(f => respuesta.toLowerCase().includes(f));
       if (convCerradaV) {
         if (recontactoTimer[tel]) { clearTimeout(recontactoTimer[tel]); delete recontactoTimer[tel]; }
+        marcarCerradaDB(tel, 'venta');
         console.log(`[VENTA BOT] Conversacion cerrada para ${tel} - sin recontacto`);
+        await enviarAStock(data.lead, tel, nombre);
       } else {
         programarRecontacto(tel, 'venta');
       }
