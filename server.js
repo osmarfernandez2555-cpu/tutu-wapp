@@ -127,7 +127,7 @@ async function enviarAStock(ld, tel, nombreWA) {
       moneda: 'ARS',
       estado: 'A revisar',
       notas: `Cargado automático desde bot de venta WhatsApp. Precio pedido por el vendedor (${ld.nombre || nombreWA}), sujeto a tasación e inspección de Tutu.`,
-      ubicacion: 'Compra WhatsApp - A tasar',
+      ubicacion: `${ld.nombre || nombreWA || 'Sin nombre'} - ${tel}`,
       telefono: tel
     };
     const r = await fetch(`${RUTHINA_URL}/api/stock`, {
