@@ -112,21 +112,19 @@ function esMensajeDuplicado(msgId, flujo) {
   return false;
 }
 
-// ── Cada bot tiene su propia instancia de Evolution. Si a un webhook le llega un evento
-// de la instancia del OTRO bot (porque en Evolution quedó cargado un webhook de más, o hay
-// un webhook global), se ignora: si no, el cliente recibe respuestas desde la línea equivocada.
-// Solo bloquea cuando el evento trae, sin lugar a dudas, el nombre de la instancia ajena.
-const instanciasAjenasAvisadas = new Set();
-function esEventoDeOtroBot(body, instanciaPropia, instanciaAjena, flujo) {
+// ── Cada bot atiende UNA sola instancia de Evolution. Un webhook acepta solamente los eventos
+// de su instancia; cualquier otro (una instancia vieja o duplicada de Evolution que todavía
+// apunta a este webhook, otro servidor, otro número) se ignora, para que el cliente no reciba
+// respuestas desde la línea equivocada. Si el evento no trae el nombre de la instancia, se acepta.
+const origenesAjenosAvisados = new Set();
+function esEventoAjeno(body, instanciaPropia, flujo) {
   const recibida = String((body && body.instance) || '').trim().toLowerCase();
   const propia = String(instanciaPropia || '').trim().toLowerCase();
-  const ajena = String(instanciaAjena || '').trim().toLowerCase();
-  if (!recibida || !ajena || ajena === propia) return false;
-  if (recibida !== ajena) return false;
-  const k = flujo + ':' + recibida;
-  if (!instanciasAjenasAvisadas.has(k)) {
-    instanciasAjenasAvisadas.add(k);
-    console.log(`[${flujo}] ⚠️ Llegan eventos de la instancia "${recibida}" a un webhook que es solo para "${propia}". Se ignoran. Revisá los webhooks en Evolution.`);
+  if (!recibida || !propia || recibida === propia) return false;
+  const k = flujo + ':' + recibida + ':' + String(body.server_url || '');
+  if (!origenesAjenosAvisados.has(k)) {
+    origenesAjenosAvisados.add(k);
+    console.log(`[${flujo}] ⚠️ Se ignoran los eventos de ${datosDeOrigen(body)}: este webhook es solo para la instancia "${propia}". Esa instancia sigue mandando mensajes acá; desconectala o sacale el webhook en Evolution.`);
   }
   return true;
 }
@@ -244,7 +242,7 @@ app.post('/webhook/evolution', async (req, res) => {
   try {
     const body = req.body;
     if (!body || body.event !== 'messages.upsert') return;
-    if (esEventoDeOtroBot(body, EVO_INSTANCE, EVO_INSTANCE2, 'BOT')) return;
+    if (esEventoAjeno(body, EVO_INSTANCE, 'BOT')) return;
     const msg = body.data;
     if (!msg || msg.key?.fromMe) return;
     if (msg.key?.remoteJid?.endsWith('@g.us')) return; // ignorar grupos
@@ -340,7 +338,7 @@ app.post('/webhook/venta', async (req, res) => {
   try {
     const body = req.body;
     if (!body || body.event !== 'messages.upsert') return;
-    if (esEventoDeOtroBot(body, EVO_INSTANCE2, EVO_INSTANCE, 'VENTA')) return;
+    if (esEventoAjeno(body, EVO_INSTANCE2, 'VENTA')) return;
     const msg = body.data;
     if (!msg || msg.key?.fromMe) return;
     if (msg.key?.remoteJid?.endsWith('@g.us')) return;
@@ -590,7 +588,7 @@ app.get('/health', (_, res) => res.json({ status: 'ok', evo: EVO_URL, instance: 
 
 app.listen(PORT, () => {
   console.log(`[SERVER] Puerto ${PORT}`);
-  console.log('[VERSION] tutu-wapp con anti-cruce de webhooks (v3)');
+  console.log('[VERSION] tutu-wapp con filtro estricto por instancia (v4)');
   console.log(`[EVO] Compra: ${EVO_URL} / instancia: ${EVO_INSTANCE}`);
   console.log(`[EVO] Venta:  ${EVO_URL2} / instancia: ${EVO_INSTANCE2}`);
   console.log(`[BOT] Tutusita: ${TUTU_BOT_URL}`);
