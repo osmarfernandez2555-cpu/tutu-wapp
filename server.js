@@ -131,6 +131,15 @@ function esEventoDeOtroBot(body, instanciaPropia, instanciaAjena, flujo) {
   return true;
 }
 
+// Diagnóstico: una línea por mensaje con la instancia, la línea (número dueño) y el servidor
+// de Evolution de donde vino el evento. Sirve para ver cuándo un webhook recibe algo ajeno.
+function datosDeOrigen(body) {
+  let host = '?';
+  try { host = new URL(body.server_url).host.replace('.up.railway.app', ''); } catch (e) {}
+  const linea = String(body.sender || '?').replace(/@.*/, '');
+  return `instancia="${body.instance || '?'}" linea="${linea}" servidor="${host}"`;
+}
+
 // ── Envío automático al stock de Ruthina cuando cierra una conversación de venta
 const RUTHINA_URL = process.env.RUTHINA_URL || 'https://compara-conejo-production.up.railway.app';
 async function enviarAStock(ld, tel, nombreWA) {
@@ -240,6 +249,7 @@ app.post('/webhook/evolution', async (req, res) => {
     if (!msg || msg.key?.fromMe) return;
     if (msg.key?.remoteJid?.endsWith('@g.us')) return; // ignorar grupos
     if (esMensajeDuplicado(msg.key?.id, 'compra')) { console.log('[BOT] Mensaje duplicado ignorado:', msg.key?.id); return; }
+    console.log('[BOT] evento de ' + datosDeOrigen(body));
 
     const jid = msg.key.remoteJid;
     const tel = jid.replace('@s.whatsapp.net','').replace('@c.us','').replace(/[^0-9]/g,'').replace(/^54/,'');
@@ -335,6 +345,7 @@ app.post('/webhook/venta', async (req, res) => {
     if (!msg || msg.key?.fromMe) return;
     if (msg.key?.remoteJid?.endsWith('@g.us')) return;
     if (esMensajeDuplicado(msg.key?.id, 'venta')) { console.log('[VENTA] Mensaje duplicado ignorado:', msg.key?.id); return; }
+    console.log('[VENTA] evento de ' + datosDeOrigen(body));
     const esImagen = !!msg.message?.imageMessage;
     const contenido = msg.message?.conversation || msg.message?.extendedTextMessage?.text || msg.message?.imageMessage?.caption || '';
     if (!esImagen && (!contenido || contenido.length > 2000)) return;
@@ -579,7 +590,9 @@ app.get('/health', (_, res) => res.json({ status: 'ok', evo: EVO_URL, instance: 
 
 app.listen(PORT, () => {
   console.log(`[SERVER] Puerto ${PORT}`);
-  console.log(`[EVO] Evolution API: ${EVO_URL} / instancia: ${EVO_INSTANCE}`);
+  console.log('[VERSION] tutu-wapp con anti-cruce de webhooks (v3)');
+  console.log(`[EVO] Compra: ${EVO_URL} / instancia: ${EVO_INSTANCE}`);
+  console.log(`[EVO] Venta:  ${EVO_URL2} / instancia: ${EVO_INSTANCE2}`);
   console.log(`[BOT] Tutusita: ${TUTU_BOT_URL}`);
-  console.log('[WEBHOOK] Esperando mensajes en /webhook/evolution');
+  console.log('[WEBHOOK] Esperando mensajes en /webhook/evolution (compra) y /webhook/venta (venta)');
 });
