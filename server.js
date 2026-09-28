@@ -96,17 +96,39 @@ function marcarCerradaDB(tel, tipo) {
   `).run(tel, tipo, Date.now());
 }
 
-// ── Anti-duplicados: Evolution a veces manda el mismo mensaje más de una vez
+// ── Anti-duplicados: Evolution a veces manda el mismo mensaje más de una vez.
+// La clave incluye el flujo (compra/venta) para que un webhook no "gaste" el
+// mensaje del otro: si el mismo id llega a los dos, cada uno lo evalúa por separado.
 const mensajesProcesados = new Set();
-function esMensajeDuplicado(msgId) {
+function esMensajeDuplicado(msgId, flujo) {
   if (!msgId) return false;
-  if (mensajesProcesados.has(msgId)) return true;
-  mensajesProcesados.add(msgId);
-  if (mensajesProcesados.size > 1000) {
+  const clave = flujo + ':' + msgId;
+  if (mensajesProcesados.has(clave)) return true;
+  mensajesProcesados.add(clave);
+  if (mensajesProcesados.size > 2000) {
     const primero = mensajesProcesados.values().next().value;
     mensajesProcesados.delete(primero);
   }
   return false;
+}
+
+// ── Cada bot tiene su propia instancia de Evolution. Si a un webhook le llega un evento
+// de la instancia del OTRO bot (porque en Evolution quedó cargado un webhook de más, o hay
+// un webhook global), se ignora: si no, el cliente recibe respuestas desde la línea equivocada.
+// Solo bloquea cuando el evento trae, sin lugar a dudas, el nombre de la instancia ajena.
+const instanciasAjenasAvisadas = new Set();
+function esEventoDeOtroBot(body, instanciaPropia, instanciaAjena, flujo) {
+  const recibida = String((body && body.instance) || '').trim().toLowerCase();
+  const propia = String(instanciaPropia || '').trim().toLowerCase();
+  const ajena = String(instanciaAjena || '').trim().toLowerCase();
+  if (!recibida || !ajena || ajena === propia) return false;
+  if (recibida !== ajena) return false;
+  const k = flujo + ':' + recibida;
+  if (!instanciasAjenasAvisadas.has(k)) {
+    instanciasAjenasAvisadas.add(k);
+    console.log(`[${flujo}] ⚠️ Llegan eventos de la instancia "${recibida}" a un webhook que es solo para "${propia}". Se ignoran. Revisá los webhooks en Evolution.`);
+  }
+  return true;
 }
 
 // ── Envío automático al stock de Ruthina cuando cierra una conversación de venta
@@ -213,10 +235,11 @@ app.post('/webhook/evolution', async (req, res) => {
   try {
     const body = req.body;
     if (!body || body.event !== 'messages.upsert') return;
+    if (esEventoDeOtroBot(body, EVO_INSTANCE, EVO_INSTANCE2, 'BOT')) return;
     const msg = body.data;
     if (!msg || msg.key?.fromMe) return;
     if (msg.key?.remoteJid?.endsWith('@g.us')) return; // ignorar grupos
-    if (esMensajeDuplicado(msg.key?.id)) { console.log('[BOT] Mensaje duplicado ignorado:', msg.key?.id); return; }
+    if (esMensajeDuplicado(msg.key?.id, 'compra')) { console.log('[BOT] Mensaje duplicado ignorado:', msg.key?.id); return; }
 
     const jid = msg.key.remoteJid;
     const tel = jid.replace('@s.whatsapp.net','').replace('@c.us','').replace(/[^0-9]/g,'').replace(/^54/,'');
@@ -307,10 +330,11 @@ app.post('/webhook/venta', async (req, res) => {
   try {
     const body = req.body;
     if (!body || body.event !== 'messages.upsert') return;
+    if (esEventoDeOtroBot(body, EVO_INSTANCE2, EVO_INSTANCE, 'VENTA')) return;
     const msg = body.data;
     if (!msg || msg.key?.fromMe) return;
     if (msg.key?.remoteJid?.endsWith('@g.us')) return;
-    if (esMensajeDuplicado(msg.key?.id)) { console.log('[VENTA] Mensaje duplicado ignorado:', msg.key?.id); return; }
+    if (esMensajeDuplicado(msg.key?.id, 'venta')) { console.log('[VENTA] Mensaje duplicado ignorado:', msg.key?.id); return; }
     const esImagen = !!msg.message?.imageMessage;
     const contenido = msg.message?.conversation || msg.message?.extendedTextMessage?.text || msg.message?.imageMessage?.caption || '';
     if (!esImagen && (!contenido || contenido.length > 2000)) return;
