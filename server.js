@@ -170,6 +170,40 @@ async function enviarAStock(ld, tel, nombreWA) {
   } catch(e) { console.error('[STOCK] Error enviando a Ruthina:', e.message); }
 }
 
+// ── Envío automático del lead al panel de clientes de Ruthina cuando cierra una
+// conversación de compra (distinto del stock: acá va al buscador de clientes/matches)
+async function enviarALead(ld, tel, nombreWA) {
+  try {
+    if (!ld) return;
+    const modelo = (ld.vehiculo || '').trim();
+    if (!modelo) { console.log('[LEAD] No se envía: sin auto identificado para', tel); return; }
+    const nombre = (ld.nombre || nombreWA || '').trim();
+    if (!nombre) { console.log('[LEAD] No se envía: sin nombre identificado para', tel); return; }
+    const esSi = v => ['si','sí','true','yes'].includes(String(v || '').trim().toLowerCase());
+    const body = {
+      nombre, telefono: tel,
+      dni: ld.dni || '',
+      modelo,
+      anio: ld.anio || '',
+      presupuesto: (ld.presupuesto || '').toString().replace(/[^\d]/g, '') || '',
+      notas: [ld.financiacion ? 'Financiación: ' + ld.financiacion : '', ld.cuota ? 'Cuota: ' + ld.cuota : '', ld.comentario || ''].filter(Boolean).join(' | '),
+      tiene_permuta: esSi(ld.tiene_permuta) ? 'si' : 'no',
+      auto_permuta: esSi(ld.tiene_permuta) ? (ld.permuta_detalle || '') : '',
+      tiene_garantes: esSi(ld.tiene_garantes) ? 'si' : 'no',
+      nombre_garante: esSi(ld.tiene_garantes) ? (ld.nombre_garante || '') : '',
+      dni_garante: esSi(ld.tiene_garantes) ? (ld.dni_garante || '') : ''
+    };
+    const r = await fetch(`${RUTHINA_URL}/api/clientes`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body)
+    });
+    const data = await r.json();
+    if (r.ok) console.log(`[LEAD] Cliente de ${tel} enviado a Ruthina:`, nombre, modelo);
+    else console.error('[LEAD] Error de Ruthina al guardar:', data.error);
+  } catch(e) { console.error('[LEAD] Error enviando a Ruthina:', e.message); }
+}
+
 function auth(req, res, next) {
   const token = req.headers['x-admin-token'] || req.query.token;
   if (token !== ADMIN_TOKEN) return res.status(401).json({ error: 'No autorizado' });
@@ -324,6 +358,7 @@ app.post('/webhook/evolution', async (req, res) => {
       if (recontactoTimer[tel]) { clearTimeout(recontactoTimer[tel]); delete recontactoTimer[tel]; }
       marcarCerradaDB(tel, 'compra');
       console.log(`[BOT] Conversacion cerrada para ${tel} - sin recontacto ni respuesta futura`);
+      await enviarALead(data.lead, tel, nombreFinal);
     } else {
       programarRecontacto(tel, 'compra');
     }
