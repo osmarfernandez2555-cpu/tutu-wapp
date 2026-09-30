@@ -77,6 +77,7 @@ db.exec(`
   CREATE TABLE IF NOT EXISTS email_historial (id INTEGER PRIMARY KEY AUTOINCREMENT, campana_id INTEGER, contact_id INTEGER, email TEXT, nombre TEXT, status TEXT, error_msg TEXT, sent_at DATETIME DEFAULT CURRENT_TIMESTAMP);
   CREATE TABLE IF NOT EXISTS leads_cargados (id INTEGER PRIMARY KEY AUTOINCREMENT, telefono TEXT NOT NULL, tipo TEXT NOT NULL, nombre TEXT, created_at DATETIME DEFAULT CURRENT_TIMESTAMP, UNIQUE(telefono, tipo));
   CREATE TABLE IF NOT EXISTS conversaciones_cerradas (telefono TEXT NOT NULL, tipo TEXT NOT NULL, cerrada_at INTEGER NOT NULL, PRIMARY KEY (telefono, tipo));
+  CREATE TABLE IF NOT EXISTS leads_acumulados (telefono TEXT NOT NULL, tipo TEXT NOT NULL, datos TEXT NOT NULL DEFAULT '{}', updated_at INTEGER NOT NULL, PRIMARY KEY (telefono, tipo));
 `);
 try { db.exec("ALTER TABLE tandas ADD COLUMN imagen_path TEXT"); } catch(e) {}
 try { db.exec("ALTER TABLE tandas ADD COLUMN imagen_caption INTEGER DEFAULT 0"); } catch(e) {}
@@ -147,6 +148,38 @@ function limpio(v) {
   const s = String(v || '').trim();
   if (!s || /^(x|xx+|si\/no|n\/a|na|-|\.)$/i.test(s)) return '';
   return s;
+}
+
+// ── Acumulador de datos del lead ─────────────────────────────────────────────
+// La IA re-emite el JSON completo de clasificación en CADA respuesta, pero a veces en
+// el mensaje de cierre no vuelve a incluir un dato que sí había dado bien varios
+// turnos antes (por ejemplo, el auto buscado en el Paso 1). Si solo usáramos la
+// clasificación del último mensaje, ese dato se perdería aunque el cliente lo haya
+// dicho clarísimo al principio. Por eso vamos guardando, turno a turno, cada campo
+// que venga con un valor válido — y nunca lo borramos si un turno posterior lo manda
+// vacío. Queda en disco para sobrevivir a un reinicio del servicio.
+const leadsAcumuladosCache = {};
+function cargarLeadAcumulado(tel, tipo) {
+  const key = tipo + ':' + tel;
+  if (leadsAcumuladosCache[key]) return leadsAcumuladosCache[key];
+  const row = db.prepare('SELECT datos FROM leads_acumulados WHERE telefono = ? AND tipo = ?').get(tel, tipo);
+  let datos = {};
+  if (row) { try { datos = JSON.parse(row.datos); } catch(e) {} }
+  leadsAcumuladosCache[key] = datos;
+  return datos;
+}
+function acumularLead(tel, tipo, ld) {
+  if (!ld) return cargarLeadAcumulado(tel, tipo);
+  const acumulado = cargarLeadAcumulado(tel, tipo);
+  for (const campo of Object.keys(ld)) {
+    const valor = limpio(ld[campo]);
+    if (valor) acumulado[campo] = valor; // solo pisa si el dato nuevo es válido; nunca lo vacía
+  }
+  db.prepare(`
+    INSERT INTO leads_acumulados (telefono, tipo, datos, updated_at) VALUES (?,?,?,?)
+    ON CONFLICT(telefono, tipo) DO UPDATE SET datos = excluded.datos, updated_at = excluded.updated_at
+  `).run(tel, tipo, JSON.stringify(acumulado), Date.now());
+  return acumulado;
 }
 
 async function enviarAStock(ld, tel, nombreWA) {
@@ -356,6 +389,8 @@ app.post('/webhook/evolution', async (req, res) => {
     const respuesta = data.message;
     if (!respuesta) return;
 
+    const leadCompra = acumularLead(tel, 'compra', data.lead);
+
     conversaciones[tel].push({ role: 'assistant', content: respuesta });
     await evoSendText(tel, respuesta.replace(/\n+/g, ' ').trim());
     db.prepare("INSERT INTO mensajes (telefono, nombre, direccion, contenido, tipo) VALUES (?,?,?,?,?)").run(tel, nombreFinal, 'saliente', respuesta, 'texto');
@@ -368,7 +403,7 @@ app.post('/webhook/evolution', async (req, res) => {
       if (recontactoTimer[tel]) { clearTimeout(recontactoTimer[tel]); delete recontactoTimer[tel]; }
       marcarCerradaDB(tel, 'compra');
       console.log(`[BOT] Conversacion cerrada para ${tel} - sin recontacto ni respuesta futura`);
-      await enviarALead(data.lead, tel, nombreFinal);
+      await enviarALead(leadCompra, tel, nombreFinal);
     } else {
       programarRecontacto(tel, 'compra');
     }
@@ -443,6 +478,7 @@ app.post('/webhook/venta', async (req, res) => {
       if (data.error) throw new Error(typeof data.error === 'string' ? data.error : JSON.stringify(data.error));
       const respuesta = data.message;
       if (!respuesta) return;
+      const leadVenta = acumularLead(tel, 'venta', data.lead);
       conversaciones['v_'+tel].push({ role: 'assistant', content: respuesta });
       await evoSendText2(tel, respuesta.replace(/\n+/g, ' ').trim());
       db.prepare("INSERT INTO mensajes_venta (telefono, nombre, direccion, contenido, tipo) VALUES (?,?,?,?,?)").run(tel, nombre, 'saliente', respuesta, 'texto');
@@ -454,7 +490,7 @@ app.post('/webhook/venta', async (req, res) => {
         if (recontactoTimer[tel]) { clearTimeout(recontactoTimer[tel]); delete recontactoTimer[tel]; }
         marcarCerradaDB(tel, 'venta');
         console.log(`[VENTA BOT] Conversacion cerrada para ${tel} - sin recontacto`);
-        await enviarAStock(data.lead, tel, nombre);
+        await enviarAStock(leadVenta, tel, nombre);
       } else {
         programarRecontacto(tel, 'venta');
       }
