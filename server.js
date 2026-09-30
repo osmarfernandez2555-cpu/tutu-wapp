@@ -140,23 +140,33 @@ function datosDeOrigen(body) {
 
 // ── Envío automático al stock de Ruthina cuando cierra una conversación de venta
 const RUTHINA_URL = process.env.RUTHINA_URL || 'https://compara-conejo-production.up.railway.app';
+// Filtra placeholders que a veces se cuelan si el modelo copia el formato de ejemplo
+// en vez de completar el dato real (p.ej. "X", "si/no", "n/a"). Sin esto, si pasa,
+// Ruthina terminaría guardando literalmente "X" como si fuera el nombre del cliente.
+function limpio(v) {
+  const s = String(v || '').trim();
+  if (!s || /^(x|xx+|si\/no|n\/a|na|-|\.)$/i.test(s)) return '';
+  return s;
+}
+
 async function enviarAStock(ld, tel, nombreWA) {
   try {
     if (!ld) return;
-    const modelo = (ld.modelo || ld.vehiculo || '').trim();
+    const modelo = limpio(ld.modelo) || limpio(ld.vehiculo);
     if (!modelo) { console.log('[STOCK] No se envía: sin modelo/vehiculo identificado para', tel); return; }
-    const marca = (ld.marca || '').trim();
+    const marca = limpio(ld.marca);
+    const nombreCliente = limpio(ld.nombre) || limpio(nombreWA);
     const body = {
       marca: marca || 'Sin especificar',
       modelo,
-      version: ld.version || '',
-      anio: ld.anio || '',
+      version: limpio(ld.version),
+      anio: limpio(ld.anio),
       km: (ld.km || '').toString().replace(/\D/g, '') || 0,
       precio: (ld.monto || '').toString().replace(/[^\d]/g, '') || '',
       moneda: 'ARS',
       estado: 'A revisar',
-      notas: `Cargado automático desde bot de venta WhatsApp. Precio pedido por el vendedor (${ld.nombre || nombreWA}), sujeto a tasación e inspección de Tutu.`,
-      ubicacion: `${ld.nombre || nombreWA || 'Sin nombre'} - ${tel}`,
+      notas: `Cargado automático desde bot de venta WhatsApp. Precio pedido por el vendedor (${nombreCliente || 'sin nombre'}), sujeto a tasación e inspección de Tutu.`,
+      ubicacion: `${nombreCliente || 'Sin nombre'} - ${tel}`,
       telefono: tel
     };
     const r = await fetch(`${RUTHINA_URL}/api/stock`, {
@@ -175,23 +185,23 @@ async function enviarAStock(ld, tel, nombreWA) {
 async function enviarALead(ld, tel, nombreWA) {
   try {
     if (!ld) return;
-    const modelo = (ld.vehiculo || '').trim();
+    const modelo = limpio(ld.vehiculo);
     if (!modelo) { console.log('[LEAD] No se envía: sin auto identificado para', tel); return; }
-    const nombre = (ld.nombre || nombreWA || '').trim();
+    const nombre = limpio(ld.nombre) || limpio(nombreWA);
     if (!nombre) { console.log('[LEAD] No se envía: sin nombre identificado para', tel); return; }
     const esSi = v => ['si','sí','true','yes'].includes(String(v || '').trim().toLowerCase());
     const body = {
       nombre, telefono: tel,
-      dni: ld.dni || '',
+      dni: limpio(ld.dni),
       modelo,
-      anio: ld.anio || '',
+      anio: limpio(ld.anio),
       presupuesto: (ld.presupuesto || '').toString().replace(/[^\d]/g, '') || '',
-      notas: [ld.financiacion ? 'Financiación: ' + ld.financiacion : '', ld.cuota ? 'Cuota: ' + ld.cuota : '', ld.comentario || ''].filter(Boolean).join(' | '),
+      notas: [ld.financiacion ? 'Financiación: ' + limpio(ld.financiacion) : '', ld.cuota ? 'Cuota: ' + limpio(ld.cuota) : '', limpio(ld.comentario)].filter(Boolean).join(' | '),
       tiene_permuta: esSi(ld.tiene_permuta) ? 'si' : 'no',
-      auto_permuta: esSi(ld.tiene_permuta) ? (ld.permuta_detalle || '') : '',
+      auto_permuta: esSi(ld.tiene_permuta) ? limpio(ld.permuta_detalle) : '',
       tiene_garantes: esSi(ld.tiene_garantes) ? 'si' : 'no',
-      nombre_garante: esSi(ld.tiene_garantes) ? (ld.nombre_garante || '') : '',
-      dni_garante: esSi(ld.tiene_garantes) ? (ld.dni_garante || '') : ''
+      nombre_garante: esSi(ld.tiene_garantes) ? limpio(ld.nombre_garante) : '',
+      dni_garante: esSi(ld.tiene_garantes) ? limpio(ld.dni_garante) : ''
     };
     const r = await fetch(`${RUTHINA_URL}/api/clientes`, {
       method: 'POST',
