@@ -25,6 +25,26 @@ const COOLDOWN_MS     = 10000; // 10 segundos entre respuestas por numero
 const ultimoMensaje   = {}; // timestamp del ultimo mensaje de cada usuario
 const recontactoTimer = {}; // timers de recontacto
 const convCerradas    = {}; // tel -> timestamp de cierre (no responder mas)
+// ── Números de prueba: el bot NUNCA los ignora. Se pueden cambiar con la variable
+// TEST_NUMBERS en Railway (separados por coma). Se comparan los últimos 10 dígitos.
+const NUMEROS_PRUEBA = (process.env.TEST_NUMBERS || '3704415138').split(',').map(n => n.replace(/\D/g,'').slice(-10)).filter(Boolean);
+function esNumeroDePrueba(tel) {
+  const t = String(tel || '').replace(/\D/g,'').slice(-10);
+  return !!t && NUMEROS_PRUEBA.includes(t);
+}
+// Deja al número de prueba como si nunca hubiera hablado con el bot
+function resetearNumeroDePrueba(tel, tipo) {
+  try {
+    if (tipo === 'compra') delete conversaciones[tel]; else delete conversaciones['v_'+tel];
+    if (recontactoTimer[tel]) { clearTimeout(recontactoTimer[tel]); delete recontactoTimer[tel]; }
+    delete leadsAcumuladosCache[tipo + ':' + tel];
+    db.prepare('DELETE FROM leads_acumulados WHERE telefono = ? AND tipo = ?').run(tel, tipo);
+    db.prepare('DELETE FROM conversaciones_cerradas WHERE telefono = ? AND tipo = ?').run(tel, tipo);
+    delete cooldowns[tel]; delete cooldowns['v_'+tel];
+    delete ultimoMensaje[tel];
+    console.log(`[PRUEBA] ${tel} (${tipo}) reiniciado para la próxima prueba`);
+  } catch(e) { console.error('[PRUEBA] Error al reiniciar:', e.message); }
+}
 const CIERRE_TTL      = 30 * 24 * 60 * 60 * 1000; // 30 dias
 const RECONTACTO_MS   = 3 * 60 * 60 * 1000;  // 3 horas
 const RETOMA_MS       = 12 * 60 * 60 * 1000; // 12 horas para retomar
@@ -331,7 +351,7 @@ app.post('/webhook/evolution', async (req, res) => {
     if (!tel || tel.length < 8) return;
 
     // Si la conversacion fue cerrada hace menos de 30 dias, ignorar (persistente en disco)
-    if (estaCerradaDB(tel, 'compra')) {
+    if (!esNumeroDePrueba(tel) && estaCerradaDB(tel, 'compra')) {
       console.log(`[BOT] Ignorando mensaje de ${tel} - conversacion cerrada`);
       return;
     }
@@ -401,9 +421,10 @@ app.post('/webhook/evolution', async (req, res) => {
     if (convCerrada) {
       // Cancelar recontacto y marcar como cerrada (persistente)
       if (recontactoTimer[tel]) { clearTimeout(recontactoTimer[tel]); delete recontactoTimer[tel]; }
-      marcarCerradaDB(tel, 'compra');
+      if (!esNumeroDePrueba(tel)) marcarCerradaDB(tel, 'compra');
       console.log(`[BOT] Conversacion cerrada para ${tel} - sin recontacto ni respuesta futura`);
       await enviarALead(leadCompra, tel, nombreFinal);
+      if (esNumeroDePrueba(tel)) resetearNumeroDePrueba(tel, 'compra');
     } else {
       programarRecontacto(tel, 'compra');
     }
@@ -431,7 +452,7 @@ app.post('/webhook/venta', async (req, res) => {
     if (!tel || tel.length < 8) return;
 
     // Si la conversacion de venta ya fue cerrada, ignorar (esto faltaba del todo antes)
-    if (estaCerradaDB(tel, 'venta')) {
+    if (!esNumeroDePrueba(tel) && estaCerradaDB(tel, 'venta')) {
       console.log(`[VENTA] Ignorando mensaje de ${tel} - conversacion cerrada`);
       return;
     }
@@ -488,9 +509,10 @@ app.post('/webhook/venta', async (req, res) => {
       const convCerradaV = FRASES_CIERRE_V.some(f => respuesta.toLowerCase().includes(f));
       if (convCerradaV) {
         if (recontactoTimer[tel]) { clearTimeout(recontactoTimer[tel]); delete recontactoTimer[tel]; }
-        marcarCerradaDB(tel, 'venta');
+        if (!esNumeroDePrueba(tel)) marcarCerradaDB(tel, 'venta');
         console.log(`[VENTA BOT] Conversacion cerrada para ${tel} - sin recontacto`);
         await enviarAStock(leadVenta, tel, nombre);
+        if (esNumeroDePrueba(tel)) resetearNumeroDePrueba(tel, 'venta');
       } else {
         programarRecontacto(tel, 'venta');
       }
@@ -669,7 +691,7 @@ app.get('/health', (_, res) => res.json({ status: 'ok', evo: EVO_URL, instance: 
 
 app.listen(PORT, () => {
   console.log(`[SERVER] Puerto ${PORT}`);
-  console.log('[VERSION] tutu-wapp con filtro estricto por instancia (v4)');
+  console.log('[VERSION] tutu-wapp con filtro estricto por instancia (v5, numeros de prueba: ' + NUMEROS_PRUEBA.join(',') + ')');
   console.log(`[EVO] Compra: ${EVO_URL} / instancia: ${EVO_INSTANCE}`);
   console.log(`[EVO] Venta:  ${EVO_URL2} / instancia: ${EVO_INSTANCE2}`);
   console.log(`[BOT] Tutusita: ${TUTU_BOT_URL}`);
