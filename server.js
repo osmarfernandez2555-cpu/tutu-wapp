@@ -395,13 +395,15 @@ app.post('/webhook/evolution', async (req, res) => {
     // Llamar al bot
     if (!conversaciones[tel]) conversaciones[tel] = [];
     conversaciones[tel].push({ role: 'user', content: mensajeParaBot });
-    if (conversaciones[tel].length > 6) conversaciones[tel] = conversaciones[tel].slice(-6);
+    if (conversaciones[tel].length > 30) conversaciones[tel] = conversaciones[tel].slice(-30);
+    // la API exige que el historial arranque con un mensaje del cliente
+    while (conversaciones[tel].length > 1 && conversaciones[tel][0].role !== 'user') conversaciones[tel].shift();
 
     const mensajesRecortados = conversaciones[tel].map(m => ({ role: m.role, content: m.content.slice(0,500) }));
     const resp = await fetch(`${TUTU_BOT_URL}/api/chat`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ messages: mensajesRecortados, sessionId: 'wa_' + tel }),
+      body: JSON.stringify({ messages: mensajesRecortados, sessionId: 'wa_' + tel, datosConocidos: cargarLeadAcumulado(tel, 'compra') }),
       timeout: 30000
     });
     const data = await resp.json();
@@ -691,7 +693,7 @@ app.get('/health', (_, res) => res.json({ status: 'ok', evo: EVO_URL, instance: 
 
 app.listen(PORT, () => {
   console.log(`[SERVER] Puerto ${PORT}`);
-  console.log('[VERSION] tutu-wapp con filtro estricto por instancia (v5, numeros de prueba: ' + NUMEROS_PRUEBA.join(',') + ')');
+  console.log('[VERSION] tutu-wapp con filtro estricto por instancia (v6, bot compra con memoria, numeros de prueba: ' + NUMEROS_PRUEBA.join(',') + ')');
   console.log(`[EVO] Compra: ${EVO_URL} / instancia: ${EVO_INSTANCE}`);
   console.log(`[EVO] Venta:  ${EVO_URL2} / instancia: ${EVO_INSTANCE2}`);
   console.log(`[BOT] Tutusita: ${TUTU_BOT_URL}`);
