@@ -97,6 +97,7 @@ db.exec(`
   CREATE TABLE IF NOT EXISTS email_historial (id INTEGER PRIMARY KEY AUTOINCREMENT, campana_id INTEGER, contact_id INTEGER, email TEXT, nombre TEXT, status TEXT, error_msg TEXT, sent_at DATETIME DEFAULT CURRENT_TIMESTAMP);
   CREATE TABLE IF NOT EXISTS leads_cargados (id INTEGER PRIMARY KEY AUTOINCREMENT, telefono TEXT NOT NULL, tipo TEXT NOT NULL, nombre TEXT, created_at DATETIME DEFAULT CURRENT_TIMESTAMP, UNIQUE(telefono, tipo));
   CREATE TABLE IF NOT EXISTS conversaciones_cerradas (telefono TEXT NOT NULL, tipo TEXT NOT NULL, cerrada_at INTEGER NOT NULL, PRIMARY KEY (telefono, tipo));
+  CREATE TABLE IF NOT EXISTS lead_envios (telefono TEXT NOT NULL, tipo TEXT NOT NULL, ruthina_id INTEGER, origen TEXT, enviado_at INTEGER NOT NULL, PRIMARY KEY (telefono, tipo));
   CREATE TABLE IF NOT EXISTS leads_acumulados (telefono TEXT NOT NULL, tipo TEXT NOT NULL, datos TEXT NOT NULL DEFAULT '{}', updated_at INTEGER NOT NULL, PRIMARY KEY (telefono, tipo));
 `);
 try { db.exec("ALTER TABLE tandas ADD COLUMN imagen_path TEXT"); } catch(e) {}
@@ -235,36 +236,121 @@ async function enviarAStock(ld, tel, nombreWA) {
 
 // ── Envío automático del lead al panel de clientes de Ruthina cuando cierra una
 // conversación de compra (distinto del stock: acá va al buscador de clientes/matches)
-async function enviarALead(ld, tel, nombreWA) {
+async function enviarALead(ld, tel, nombreWA, opts = {}) {
   try {
-    if (!ld) return;
-    const modelo = limpio(ld.vehiculo);
+    ld = ld || {};
+    const abandonado = !!opts.abandonado;
+    // Un lead abandonado se carga igual, con lo que haya; el cierre normal sigue exigiendo auto
+    const modelo = limpio(ld.vehiculo) || (abandonado ? 'Sin especificar' : '');
     if (!modelo) { console.log('[LEAD] No se envía: sin auto identificado para', tel); return; }
-    const nombre = limpio(ld.nombre) || limpio(nombreWA);
+    const nombre = limpio(ld.nombre) || limpio(nombreWA) || (abandonado ? 'Sin nombre (' + tel + ')' : '');
     if (!nombre) { console.log('[LEAD] No se envía: sin nombre identificado para', tel); return; }
     const esSi = v => ['si','sí','true','yes'].includes(String(v || '').trim().toLowerCase());
+    const notasBase = [ld.financiacion ? 'Financiación: ' + limpio(ld.financiacion) : '', ld.cuota ? 'Cuota: ' + limpio(ld.cuota) : '', limpio(ld.comentario)].filter(Boolean).join(' | ');
+    const aviso = abandonado
+      ? `⚠️ LEAD INCOMPLETO: el cliente dejó la conversación sin terminar${opts.horas ? ' (hace ' + opts.horas + ' h)' : ''}. Contactarlo para completar los datos.` + (opts.ultimoMensaje ? ` Su último mensaje: "${opts.ultimoMensaje}".` : '')
+      : '';
     const body = {
       nombre, telefono: tel,
       dni: limpio(ld.dni),
       modelo,
       anio: limpio(ld.anio),
       presupuesto: (ld.presupuesto || '').toString().replace(/[^\d]/g, '') || '',
-      notas: [ld.financiacion ? 'Financiación: ' + limpio(ld.financiacion) : '', ld.cuota ? 'Cuota: ' + limpio(ld.cuota) : '', limpio(ld.comentario)].filter(Boolean).join(' | '),
+      notas: [aviso, notasBase].filter(Boolean).join(' | '),
       tiene_permuta: esSi(ld.tiene_permuta) ? 'si' : 'no',
       auto_permuta: esSi(ld.tiene_permuta) ? limpio(ld.permuta_detalle) : '',
       tiene_garantes: esSi(ld.tiene_garantes) ? 'si' : 'no',
       nombre_garante: esSi(ld.tiene_garantes) ? limpio(ld.nombre_garante) : '',
       dni_garante: esSi(ld.tiene_garantes) ? limpio(ld.dni_garante) : ''
     };
+    // Si ya habíamos cargado a este cliente (por ejemplo como incompleto), se actualiza esa
+    // misma tarjeta en vez de crear un duplicado
+    const previo = db.prepare('SELECT ruthina_id FROM lead_envios WHERE telefono = ? AND tipo = ?').get(tel, 'compra');
+    if (previo && previo.ruthina_id) {
+      try {
+        const pr = await fetch(`${RUTHINA_URL}/api/clientes/${previo.ruthina_id}`, {
+          method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ nombre: body.nombre, dni: body.dni, modelo: body.modelo, anio: body.anio, presupuesto: body.presupuesto, notas: body.notas,
+            tiene_permuta: body.tiene_permuta, auto_permuta: body.auto_permuta, tiene_garantes: body.tiene_garantes, nombre_garante: body.nombre_garante, dni_garante: body.dni_garante })
+        });
+        const pd = await pr.json();
+        if (pr.ok && pd.updated !== 0) {
+          console.log(`[LEAD] Cliente de ${tel} ACTUALIZADO en Ruthina (id ${previo.ruthina_id}):`, nombre, modelo);
+          db.prepare('UPDATE lead_envios SET enviado_at = ?, origen = ? WHERE telefono = ? AND tipo = ?').run(Date.now(), abandonado ? 'abandono' : 'cierre', tel, 'compra');
+          return true;
+        }
+        console.log(`[LEAD] La tarjeta ${previo.ruthina_id} ya no existe en Ruthina, se crea una nueva`);
+      } catch(e) { console.error('[LEAD] No se pudo actualizar, se crea una nueva:', e.message); }
+    }
     const r = await fetch(`${RUTHINA_URL}/api/clientes`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body)
     });
     const data = await r.json();
-    if (r.ok) console.log(`[LEAD] Cliente de ${tel} enviado a Ruthina:`, nombre, modelo);
-    else console.error('[LEAD] Error de Ruthina al guardar:', data.error);
+    if (r.ok) {
+      console.log(`[LEAD] Cliente de ${tel} enviado a Ruthina${abandonado ? ' (INCOMPLETO)' : ''}:`, nombre, modelo);
+      db.prepare(`INSERT INTO lead_envios (telefono, tipo, ruthina_id, origen, enviado_at) VALUES (?,?,?,?,?)
+        ON CONFLICT(telefono, tipo) DO UPDATE SET ruthina_id = excluded.ruthina_id, origen = excluded.origen, enviado_at = excluded.enviado_at`)
+        .run(tel, 'compra', data.id || null, abandonado ? 'abandono' : 'cierre', Date.now());
+      return true;
+    }
+    console.error('[LEAD] Error de Ruthina al guardar:', data.error);
   } catch(e) { console.error('[LEAD] Error enviando a Ruthina:', e.message); }
+  return false;
+}
+
+// ── Conversaciones abandonadas ───────────────────────────────────────────────
+// Mucha gente escribe "busco un auto" (o contesta algunas preguntas) y se va. Si pasan
+// ABANDONO_HORAS sin que la conversación se haya cerrado, se carga igual como lead con
+// lo que se haya juntado, marcado como INCOMPLETO para que un vendedor lo contacte.
+const ABANDONO_HORAS = parseFloat(process.env.ABANDONO_HORAS || '24');
+const ABANDONO_MAX_DIAS = parseFloat(process.env.ABANDONO_MAX_DIAS || '7'); // no rescatar conversaciones más viejas que esto
+const ABANDONO_CADA_MIN = 15;
+let barriendoAbandonados = false;
+async function barrerAbandonados() {
+  if (barriendoAbandonados) return;
+  barriendoAbandonados = true;
+  try {
+    const limite = Date.now() - ABANDONO_HORAS * 3600 * 1000;
+    const filas = db.prepare(`
+      SELECT a.telefono, a.tipo, a.datos, a.updated_at
+      FROM leads_acumulados a
+      LEFT JOIN conversaciones_cerradas c ON c.telefono = a.telefono AND c.tipo = a.tipo
+      LEFT JOIN lead_envios e ON e.telefono = a.telefono AND e.tipo = a.tipo
+      WHERE a.updated_at < ?
+        AND (c.cerrada_at IS NULL OR c.cerrada_at < a.updated_at)
+        AND (e.enviado_at IS NULL OR e.enviado_at < a.updated_at)
+        AND a.updated_at > ?
+      ORDER BY a.updated_at ASC LIMIT 30
+    `).all(limite, Date.now() - ABANDONO_MAX_DIAS * 86400000);
+    for (const f of filas) {
+      if (esNumeroDePrueba(f.telefono)) {
+        // los números de prueba no generan leads
+        db.prepare(`INSERT INTO lead_envios (telefono, tipo, ruthina_id, origen, enviado_at) VALUES (?,?,?,?,?)
+          ON CONFLICT(telefono, tipo) DO UPDATE SET enviado_at = excluded.enviado_at`).run(f.telefono, f.tipo, null, 'prueba', Date.now());
+        continue;
+      }
+      let ld = {}; try { ld = JSON.parse(f.datos) || {}; } catch(e) {}
+      const horas = Math.round((Date.now() - f.updated_at) / 3600000);
+      const tabla = f.tipo === 'venta' ? 'mensajes_venta' : 'mensajes';
+      const ult = db.prepare(`SELECT contenido, nombre FROM ${tabla} WHERE telefono = ? AND direccion = 'entrante' AND contenido NOT IN ('[foto]') ORDER BY id DESC LIMIT 1`).get(f.telefono);
+      const ultimoMensaje = ult && ult.contenido ? ult.contenido.replace(/\s+/g, ' ').slice(0, 160) : '';
+      const nombreWA = ult && ult.nombre && ult.nombre !== f.telefono ? ult.nombre : '';
+      let ok = false;
+      if (f.tipo === 'venta') {
+        if (limpio(ld.modelo) || limpio(ld.vehiculo)) { await enviarAStock(ld, f.telefono, nombreWA); ok = true; }
+        else console.log(`[ABANDONO] Venta de ${f.telefono} sin auto identificado: no hay nada que cargar al stock`);
+        db.prepare(`INSERT INTO lead_envios (telefono, tipo, ruthina_id, origen, enviado_at) VALUES (?,?,?,?,?)
+          ON CONFLICT(telefono, tipo) DO UPDATE SET enviado_at = excluded.enviado_at, origen = excluded.origen`).run(f.telefono, 'venta', null, ok ? 'abandono' : 'abandono-vacio', Date.now());
+      } else {
+        ok = await enviarALead(ld, f.telefono, nombreWA, { abandonado: true, horas, ultimoMensaje });
+        // si falló el envío no se marca: se reintenta en la próxima pasada
+      }
+      if (ok) console.log(`[ABANDONO] ${f.tipo} de ${f.telefono} cargado a Ruthina (sin actividad hace ${horas} h)`);
+    }
+  } catch(e) { console.error('[ABANDONO] Error en el barrido:', e.message); }
+  finally { barriendoAbandonados = false; }
 }
 
 function auth(req, res, next) {
@@ -693,7 +779,10 @@ app.get('/health', (_, res) => res.json({ status: 'ok', evo: EVO_URL, instance: 
 
 app.listen(PORT, () => {
   console.log(`[SERVER] Puerto ${PORT}`);
-  console.log('[VERSION] tutu-wapp con filtro estricto por instancia (v6, bot compra con memoria, numeros de prueba: ' + NUMEROS_PRUEBA.join(',') + ')');
+  console.log(`[ABANDONO] Los leads incompletos se cargan a Ruthina tras ${ABANDONO_HORAS} h sin actividad (variable ABANDONO_HORAS)`);
+  setTimeout(barrerAbandonados, 60 * 1000);
+  setInterval(barrerAbandonados, ABANDONO_CADA_MIN * 60 * 1000);
+  console.log('[VERSION] tutu-wapp con filtro estricto por instancia (v7, leads abandonados, numeros de prueba: ' + NUMEROS_PRUEBA.join(',') + ')');
   console.log(`[EVO] Compra: ${EVO_URL} / instancia: ${EVO_INSTANCE}`);
   console.log(`[EVO] Venta:  ${EVO_URL2} / instancia: ${EVO_INSTANCE2}`);
   console.log(`[BOT] Tutusita: ${TUTU_BOT_URL}`);
