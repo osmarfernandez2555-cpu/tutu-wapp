@@ -419,6 +419,149 @@ async function evoStatus() {
   } catch(e) { return 'error'; }
 }
 
+
+// ── AUDIOS: entender (voz → texto) y responder con voz (texto → voz) ─────────
+// Opciones GRATIS (sin tarjeta):
+//   Entender audios  → GROQ_API_KEY   (console.groq.com, Whisper gratis: ~2.000 audios por día)
+//   Responder en voz → GEMINI_API_KEY (aistudio.google.com, voz de Gemini gratis con cupo diario limitado;
+//                       si se acaba el cupo el bot contesta en texto, no se cae nada)
+// Opción paga (más simple, centavos por audio): OPENAI_API_KEY sirve para las dos cosas.
+//   AUDIO_STT_PROVIDER = groq | openai   (por defecto: groq si hay GROQ_API_KEY, si no openai)
+//   AUDIO_TTS_PROVIDER = gemini | openai (por defecto: gemini si hay GEMINI_API_KEY, si no openai)
+//   AUDIO_ENTENDER  = si | no                  (por defecto si)
+//   RESPONDER_AUDIO = espejo | siempre | no    (por defecto espejo: si el cliente manda audio, el bot contesta con audio)
+//   AUDIO_VOZ       = voz (Gemini: Kore, Aoede, Puck, Charon… · OpenAI: nova, shimmer, alloy…)
+//   AUDIO_STT_MODEL / AUDIO_TTS_MODEL = para cambiar de modelo
+//   AUDIO_MAX_CHARS = largo máximo de una respuesta para mandarla en audio (por defecto 600; si es más larga va en texto)
+const OPENAI_API_KEY  = process.env.OPENAI_API_KEY || '';
+const GROQ_API_KEY    = process.env.GROQ_API_KEY || '';
+const GEMINI_API_KEY  = process.env.GEMINI_API_KEY || '';
+const STT_PROVIDER    = (process.env.AUDIO_STT_PROVIDER || (GROQ_API_KEY ? 'groq' : 'openai')).toLowerCase();
+const TTS_PROVIDER    = (process.env.AUDIO_TTS_PROVIDER || (GEMINI_API_KEY ? 'gemini' : 'openai')).toLowerCase();
+const HAY_STT = STT_PROVIDER === 'groq' ? !!GROQ_API_KEY : !!OPENAI_API_KEY;
+const HAY_TTS = TTS_PROVIDER === 'gemini' ? !!GEMINI_API_KEY : !!OPENAI_API_KEY;
+const AUDIO_ENTENDER  = (process.env.AUDIO_ENTENDER || 'si').toLowerCase() !== 'no';
+const RESPONDER_AUDIO = (process.env.RESPONDER_AUDIO || 'espejo').toLowerCase();
+const AUDIO_VOZ       = process.env.AUDIO_VOZ || (TTS_PROVIDER === 'gemini' ? 'Kore' : 'nova');
+const AUDIO_STT_MODEL = process.env.AUDIO_STT_MODEL || (STT_PROVIDER === 'groq' ? 'whisper-large-v3-turbo' : 'whisper-1');
+const AUDIO_TTS_MODEL = process.env.AUDIO_TTS_MODEL || (TTS_PROVIDER === 'gemini' ? 'gemini-2.5-flash-preview-tts' : 'gpt-4o-mini-tts');
+const AUDIO_MAX_CHARS = Math.max(100, Number(process.env.AUDIO_MAX_CHARS || 600));
+console.log(`[AUDIO] entender: ${AUDIO_ENTENDER && HAY_STT ? STT_PROVIDER + ' (' + AUDIO_STT_MODEL + ')' : 'APAGADO'} · responder: ${RESPONDER_AUDIO !== 'no' && HAY_TTS ? TTS_PROVIDER + ' (' + AUDIO_TTS_MODEL + ', modo ' + RESPONDER_AUDIO + ')' : 'APAGADO'}`);
+
+// baja el audio desde Evolution (base64) → { buffer, mimetype }
+async function evoBajarAudio(baseUrl, apikey, instancia, msg, body) {
+  let b64 = msg.message?.base64 || msg.base64 || body?.data?.base64 || '';
+  let mime = msg.message?.audioMessage?.mimetype || 'audio/ogg';
+  if (!b64) {
+    const r = await fetch(`${baseUrl}/chat/getBase64FromMediaMessage/${instancia}`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json', 'apikey': apikey },
+      body: JSON.stringify({ message: { key: msg.key }, convertToMp4: false }), timeout: 30000
+    });
+    const d = await r.json();
+    if (!r.ok || !d.base64) throw new Error('Evolution no devolvió el audio: ' + JSON.stringify(d).slice(0, 150));
+    b64 = d.base64; mime = d.mimetype || mime;
+  }
+  return { buffer: Buffer.from(String(b64).replace(/^data:[^,]+,/, ''), 'base64'), mimetype: String(mime).split(';')[0] };
+}
+
+// voz → texto (Groq u OpenAI: misma API)
+async function transcribirAudio(buffer, mimetype) {
+  if (!HAY_STT) throw new Error('Falta ' + (STT_PROVIDER === 'groq' ? 'GROQ_API_KEY' : 'OPENAI_API_KEY'));
+  if (typeof FormData === 'undefined' || typeof Blob === 'undefined') throw new Error('Este Node no tiene FormData nativo (usar Node 18+)');
+  const ext = /mpeg|mp3/.test(mimetype) ? 'mp3' : /mp4|m4a/.test(mimetype) ? 'm4a' : /wav/.test(mimetype) ? 'wav' : /webm/.test(mimetype) ? 'webm' : 'ogg';
+  const fd = new FormData();
+  fd.append('file', new Blob([buffer], { type: mimetype || 'audio/ogg' }), 'audio.' + ext);
+  fd.append('model', AUDIO_STT_MODEL);
+  fd.append('language', 'es');
+  fd.append('prompt', 'Conversación por WhatsApp con una concesionaria de autos usados en Córdoba, Argentina: Tutu Automotores. Palabras: permuta, prendario, Bancor, Banco Nación, Galicia, CUIL, DNI, cuotas, anticipo, kilómetros, patente, Etios, Onix, Cronos, Hilux.');
+  const url = STT_PROVIDER === 'groq' ? 'https://api.groq.com/openai/v1/audio/transcriptions' : 'https://api.openai.com/v1/audio/transcriptions'
+  const r = await globalThis.fetch(url, {
+    method: 'POST', headers: { Authorization: 'Bearer ' + (STT_PROVIDER === 'groq' ? GROQ_API_KEY : OPENAI_API_KEY) }, body: fd, signal: AbortSignal.timeout(60000)
+  });
+  const d = await r.json();
+  if (!r.ok) throw new Error(STT_PROVIDER + ' transcripción: ' + ((d.error && d.error.message) || r.status));
+  return String(d.text || '').trim();
+}
+
+// texto → voz (OpenAI) → base64 (mp3)
+function textoParaVoz(t) {
+  return String(t || '').replace(/https?:\/\/\S+/g, '').replace(/[\u{1F000}-\u{1FAFF}\u{2600}-\u{27BF}\u{FE0F}\u{200D}]/gu, '')
+    .replace(/[*_`#>~]/g, '').replace(/\s+/g, ' ').trim();
+}
+// PCM 16 bits mono → WAV (Gemini devuelve PCM crudo; Evolution lo convierte a nota de voz con encoding:true)
+function pcmAWav(pcm, rate = 24000) {
+  const h = Buffer.alloc(44);
+  h.write('RIFF', 0); h.writeUInt32LE(36 + pcm.length, 4); h.write('WAVE', 8); h.write('fmt ', 12);
+  h.writeUInt32LE(16, 16); h.writeUInt16LE(1, 20); h.writeUInt16LE(1, 22); h.writeUInt32LE(rate, 24);
+  h.writeUInt32LE(rate * 2, 28); h.writeUInt16LE(2, 32); h.writeUInt16LE(16, 34); h.write('data', 36); h.writeUInt32LE(pcm.length, 40);
+  return Buffer.concat([h, pcm]);
+}
+async function textoAVoz(texto) {
+  if (!HAY_TTS) throw new Error('Falta ' + (TTS_PROVIDER === 'gemini' ? 'GEMINI_API_KEY' : 'OPENAI_API_KEY'));
+  if (TTS_PROVIDER === 'gemini') {
+    const r = await globalThis.fetch(`https://generativelanguage.googleapis.com/v1beta/models/${AUDIO_TTS_MODEL}:generateContent`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json', 'x-goog-api-key': GEMINI_API_KEY },
+      body: JSON.stringify({
+        contents: [{ parts: [{ text: 'Decí en español rioplatense (Argentina), con tono cálido, natural y amable, como un asesor de ventas de una concesionaria: ' + texto }] }],
+        generationConfig: { responseModalities: ['AUDIO'], speechConfig: { voiceConfig: { prebuiltVoiceConfig: { voiceName: AUDIO_VOZ } } } }
+      }), signal: AbortSignal.timeout(60000)
+    });
+    const d = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error('Gemini voz ' + r.status + ': ' + ((d.error && d.error.message) || '').slice(0, 150));
+    const part = (((d.candidates || [])[0] || {}).content || {}).parts || [];
+    const inline = (part.find(x => x.inlineData) || {}).inlineData;
+    if (!inline || !inline.data) throw new Error('Gemini no devolvió audio');
+    const m = /rate=(\d+)/.exec(inline.mimeType || '');
+    return pcmAWav(Buffer.from(inline.data, 'base64'), m ? Number(m[1]) : 24000).toString('base64');
+  }
+  const body = { model: AUDIO_TTS_MODEL, voice: AUDIO_VOZ, input: texto, response_format: 'mp3' };
+  if (/gpt-4o/.test(AUDIO_TTS_MODEL)) body.instructions = 'Hablá en español rioplatense (Argentina), con tono cálido, natural y amable, como un asesor de ventas de una concesionaria. Ritmo tranquilo.';
+  const r = await globalThis.fetch('https://api.openai.com/v1/audio/speech', {
+    method: 'POST', headers: { Authorization: 'Bearer ' + OPENAI_API_KEY, 'Content-Type': 'application/json' },
+    body: JSON.stringify(body), signal: AbortSignal.timeout(60000)
+  });
+  if (!r.ok) { let m = r.status; try { const d = await r.json(); m = (d.error && d.error.message) || m } catch (e) {} throw new Error('OpenAI voz: ' + m); }
+  return Buffer.from(await r.arrayBuffer()).toString('base64');
+}
+
+// manda una nota de voz por Evolution
+async function evoSendAudio(baseUrl, apikey, instancia, numero, base64) {
+  const r = await fetch(`${baseUrl}/message/sendWhatsAppAudio/${instancia}`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json', 'apikey': apikey },
+    body: JSON.stringify({ number: numero, audio: base64, delay: 1500, encoding: true }), timeout: 60000
+  });
+  const d = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error('Evolution sendWhatsAppAudio ' + r.status + ': ' + JSON.stringify(d).slice(0, 150));
+  return d;
+}
+
+// Audio del cliente → texto. Devuelve '' si no se pudo.
+async function audioATexto(canal, baseUrl, apikey, instancia, msg, body) {
+  if (!AUDIO_ENTENDER || !HAY_STT) { console.log(`[${canal}] audio recibido pero no hay clave para entenderlo (GROQ_API_KEY u OPENAI_API_KEY) o AUDIO_ENTENDER=no`); return ''; }
+  try {
+    const { buffer, mimetype } = await evoBajarAudio(baseUrl, apikey, instancia, msg, body);
+    const txt = await transcribirAudio(buffer, mimetype);
+    console.log(`[${canal}] 🎤 audio transcripto (${Math.round(buffer.length / 1024)} KB): ${txt.slice(0, 80)}`);
+    return txt;
+  } catch (e) { console.error(`[${canal}] no pude transcribir el audio:`, e.message); return ''; }
+}
+
+// Respuesta del bot: por audio si corresponde, si no (o si falla) por texto. Devuelve 'audio' | 'texto'.
+async function enviarRespuestaBot(canal, respuesta, viaAudio, enviarTexto, baseUrl, apikey, instancia, numero) {
+  const hablar = HAY_TTS && (RESPONDER_AUDIO === 'siempre' || (RESPONDER_AUDIO === 'espejo' && viaAudio));
+  const limpio = textoParaVoz(respuesta);
+  if (hablar && limpio && !/https?:\/\//.test(respuesta) && limpio.length <= AUDIO_MAX_CHARS) {
+    try {
+      const b64 = await textoAVoz(limpio);
+      await evoSendAudio(baseUrl, apikey, instancia, numero, b64);
+      console.log(`[${canal}] 🔊 respuesta enviada como audio (${limpio.length} caracteres)`);
+      return 'audio';
+    } catch (e) { console.error(`[${canal}] falló el audio, mando texto:`, e.message); }
+  }
+  await enviarTexto();
+  return 'texto';
+}
+
 // ── WEBHOOK — mensajes entrantes de Evolution API ─────────────────────────────
 app.post('/webhook/evolution', async (req, res) => {
   res.sendStatus(200); // responder rapido
@@ -443,11 +586,22 @@ app.post('/webhook/evolution', async (req, res) => {
     }
     const esImagen = !!msg.message?.imageMessage;
     const esAudio  = !!msg.message?.audioMessage;
-    const contenido = msg.message?.conversation || msg.message?.extendedTextMessage?.text || msg.message?.imageMessage?.caption || '';
+    let contenido = msg.message?.conversation || msg.message?.extendedTextMessage?.text || msg.message?.imageMessage?.caption || '';
     // Si es imagen sin texto igual continuar el flujo
-    if (!esImagen && (!contenido || contenido.length > 2000)) return;
+    if (!esImagen && !esAudio && (!contenido || contenido.length > 2000)) return;
 
-    const tipo = esImagen ? 'imagen' : esAudio ? 'audio' : 'texto';
+    // Audio del cliente: se transcribe y sigue el flujo como si hubiera escrito
+    let viaAudio = false;
+    if (esAudio && !contenido) {
+      const txt = await audioATexto('BOT', EVO_URL, EVO_APIKEY, EVO_INSTANCE, msg, body);
+      if (!txt) {
+        await evoSendText(tel, 'No pude escuchar bien tu audio 🙏 ¿Me lo escribís por acá?').catch(() => {});
+        return;
+      }
+      contenido = txt.slice(0, 2000); viaAudio = true;
+    }
+
+    const tipo = esImagen ? 'imagen' : viaAudio ? 'audio' : 'texto';
     const nombre = msg.pushName || tel;
     const contacto = db.prepare("SELECT nombre FROM contacts WHERE telefono = ?").get(tel);
     const nombreFinal = contacto?.nombre || nombre;
@@ -460,8 +614,8 @@ app.post('/webhook/evolution', async (req, res) => {
     }
     if (esImagen) cooldowns[tel] = ahora;
 
-    db.prepare("INSERT INTO mensajes (telefono, nombre, direccion, contenido, tipo) VALUES (?,?,?,?,?)").run(tel, nombreFinal, 'entrante', contenido || '[foto]', tipo);
-    console.log(`[MSG] <- ${nombreFinal} (${tel}): ${(contenido||'[foto]').slice(0,50)}`);
+    db.prepare("INSERT INTO mensajes (telefono, nombre, direccion, contenido, tipo) VALUES (?,?,?,?,?)").run(tel, nombreFinal, 'entrante', viaAudio ? '🎤 ' + contenido : (contenido || '[foto]'), tipo);
+    console.log(`[MSG] <- ${nombreFinal} (${tel}): ${(viaAudio ? '🎤 ' : '') + (contenido||'[foto]').slice(0,50)}`);
 
     // Actualizar timestamp y cancelar recontacto
     ultimoMensaje[tel] = Date.now();
@@ -476,7 +630,7 @@ app.post('/webhook/evolution', async (req, res) => {
     ultimoMensaje[tel + '_prev'] = Date.now();
 
     // Si es imagen, enviar mensaje especial al bot para que continúe el flujo
-    const mensajeParaBot = tipo !== 'texto' ? '[El cliente envió una foto]' : contenido;
+    const mensajeParaBot = esImagen ? '[El cliente envió una foto]' : contenido;
 
     // Llamar al bot
     if (!conversaciones[tel]) conversaciones[tel] = [];
@@ -500,8 +654,8 @@ app.post('/webhook/evolution', async (req, res) => {
     const leadCompra = acumularLead(tel, 'compra', data.lead);
 
     conversaciones[tel].push({ role: 'assistant', content: respuesta });
-    await evoSendText(tel, respuesta.replace(/\n+/g, ' ').trim());
-    db.prepare("INSERT INTO mensajes (telefono, nombre, direccion, contenido, tipo) VALUES (?,?,?,?,?)").run(tel, nombreFinal, 'saliente', respuesta, 'texto');
+    const viaSalida = await enviarRespuestaBot('BOT', respuesta, viaAudio, () => evoSendText(tel, respuesta.replace(/\n+/g, ' ').trim()), EVO_URL, EVO_APIKEY, EVO_INSTANCE, '54' + tel);
+    db.prepare("INSERT INTO mensajes (telefono, nombre, direccion, contenido, tipo) VALUES (?,?,?,?,?)").run(tel, nombreFinal, 'saliente', viaSalida === 'audio' ? '🔊 ' + respuesta : respuesta, viaSalida);
     console.log(`[BOT] -> ${nombreFinal}: ${respuesta.slice(0,60)}`);
     // Detectar si la conversacion cerro para NO enviar recontacto
     const FRASES_CIERRE = ['solo nos contactaremos', 'si encontramos una propuesta', 'gracias por tu tiempo', 'muchas gracias por', 'te vamos a contactar', 'nos pondremos en contacto'];
@@ -534,8 +688,9 @@ app.post('/webhook/venta', async (req, res) => {
     if (esMensajeDuplicado(msg.key?.id, 'venta')) { console.log('[VENTA] Mensaje duplicado ignorado:', msg.key?.id); return; }
     console.log('[VENTA] evento de ' + datosDeOrigen(body));
     const esImagen = !!msg.message?.imageMessage;
-    const contenido = msg.message?.conversation || msg.message?.extendedTextMessage?.text || msg.message?.imageMessage?.caption || '';
-    if (!esImagen && (!contenido || contenido.length > 2000)) return;
+    const esAudio  = !!msg.message?.audioMessage;
+    let contenido = msg.message?.conversation || msg.message?.extendedTextMessage?.text || msg.message?.imageMessage?.caption || '';
+    if (!esImagen && !esAudio && (!contenido || contenido.length > 2000)) return;
     const tel = msg.key.remoteJid.replace('@s.whatsapp.net','').replace('@c.us','').replace(/[^0-9]/g,'').replace(/^54/,'');
     if (!tel || tel.length < 8) return;
 
@@ -545,12 +700,23 @@ app.post('/webhook/venta', async (req, res) => {
       return;
     }
 
+    // Audio del cliente: se transcribe y sigue el flujo como si hubiera escrito
+    let viaAudio = false;
+    if (esAudio && !contenido) {
+      const txt = await audioATexto('VENTA', EVO_URL2, EVO_APIKEY2, EVO_INSTANCE2, msg, body);
+      if (!txt) {
+        await evoSendText2(tel, 'No pude escuchar bien tu audio 🙏 ¿Me lo escribís por acá?').catch(() => {});
+        return;
+      }
+      contenido = txt.slice(0, 2000); viaAudio = true;
+    }
+
     const ahoraV = Date.now();
     if (esImagen && cooldowns['v_'+tel] && ahoraV - cooldowns['v_'+tel] < COOLDOWN_MS) return;
     if (esImagen) cooldowns['v_'+tel] = ahoraV;
     const nombre = msg.pushName || tel;
     const mensajeParaBot = esImagen ? '[El cliente envió una foto]' : contenido;
-    db.prepare("INSERT INTO mensajes_venta (telefono, nombre, direccion, contenido, tipo) VALUES (?,?,?,?,?)").run(tel, nombre, 'entrante', contenido || '[foto]', esImagen ? 'imagen' : 'texto');
+    db.prepare("INSERT INTO mensajes_venta (telefono, nombre, direccion, contenido, tipo) VALUES (?,?,?,?,?)").run(tel, nombre, 'entrante', viaAudio ? '🎤 ' + contenido : (contenido || '[foto]'), esImagen ? 'imagen' : viaAudio ? 'audio' : 'texto');
     console.log(`[VENTA] <- ${nombre} (${tel}): ${mensajeParaBot.slice(0,50)}`);
 
     // Actualizar timestamp y programar recontacto
@@ -589,8 +755,9 @@ app.post('/webhook/venta', async (req, res) => {
       if (!respuesta) return;
       const leadVenta = acumularLead(tel, 'venta', data.lead);
       conversaciones['v_'+tel].push({ role: 'assistant', content: respuesta });
-      await evoSendText2(tel, respuesta.replace(/\n+/g, ' ').trim());
-      db.prepare("INSERT INTO mensajes_venta (telefono, nombre, direccion, contenido, tipo) VALUES (?,?,?,?,?)").run(tel, nombre, 'saliente', respuesta, 'texto');
+      const numVenta = tel.startsWith('9') ? '54' + tel : '549' + tel;
+      const viaSalidaV = await enviarRespuestaBot('VENTA', respuesta, viaAudio, () => evoSendText2(tel, respuesta.replace(/\n+/g, ' ').trim()), EVO_URL2, EVO_APIKEY2, EVO_INSTANCE2, numVenta);
+      db.prepare("INSERT INTO mensajes_venta (telefono, nombre, direccion, contenido, tipo) VALUES (?,?,?,?,?)").run(tel, nombre, 'saliente', viaSalidaV === 'audio' ? '🔊 ' + respuesta : respuesta, viaSalidaV);
       console.log(`[VENTA BOT] -> ${nombre}: ${respuesta.slice(0,60)}`);
       // Detectar cierre para NO enviar recontacto, y mandar el auto a Ruthina
       const FRASES_CIERRE_V = ['si tenemos un comprador', 'muchas gracias por la info', 'gracias por la info', 'consignacion', 'consignación', 'te contactamos'];
