@@ -253,6 +253,7 @@ async function enviarALead(ld, tel, nombreWA, opts = {}) {
     const body = {
       nombre, telefono: tel,
       dni: limpio(ld.dni),
+      sexo: /^(m|f)$/i.test(limpio(ld.sexo)) ? limpio(ld.sexo).toUpperCase() : '',   // lo deduce el bot por la charla; Ruthina lo usa para armar el CUIL
       modelo,
       anio: limpio(ld.anio),
       presupuesto: (ld.presupuesto || '').toString().replace(/[^\d]/g, '') || '',
@@ -270,7 +271,7 @@ async function enviarALead(ld, tel, nombreWA, opts = {}) {
       try {
         const pr = await fetch(`${RUTHINA_URL}/api/clientes/${previo.ruthina_id}`, {
           method: 'PATCH', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ nombre: body.nombre, dni: body.dni, modelo: body.modelo, anio: body.anio, presupuesto: body.presupuesto, notas: body.notas,
+          body: JSON.stringify({ nombre: body.nombre, dni: body.dni, sexo: body.sexo, modelo: body.modelo, anio: body.anio, presupuesto: body.presupuesto, notas: body.notas,
             tiene_permuta: body.tiene_permuta, auto_permuta: body.auto_permuta, tiene_garantes: body.tiene_garantes, nombre_garante: body.nombre_garante, dni_garante: body.dni_garante })
         });
         const pd = await pr.json();
